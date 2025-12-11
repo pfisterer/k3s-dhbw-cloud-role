@@ -1,0 +1,101 @@
+---
+# Install APT packages and tools
+- name: Ensure apt packages installed
+  ansible.builtin.apt:
+    name:
+      - curl
+      - python3-kubernetes
+    state: present
+    update_cache: true
+    cache_valid_time: 86400
+
+- name: Ensure Helm is installed
+  ansible.builtin.shell: |
+    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  args:
+    executable: /bin/bash
+    creates: /usr/local/bin/helm
+  tags:
+    - skip_ansible_lint
+    - "ansible-lint:command-instead-of-shell"
+
+- name: Ensure Skaffold is installed
+  ansible.builtin.shell: |
+    curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64 && \
+    install skaffold /usr/local/bin/ && \
+    rm skaffold
+  args:
+    executable: /bin/bash
+    creates: /usr/local/bin/skaffold
+  tags:
+    - skip_ansible_lint
+
+- name: Ensure kubectl is installed
+  ansible.builtin.shell: |
+    curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && \
+    install -m 755 kubectl /usr/local/bin/kubectl && \
+    rm kubectl
+  args:
+    executable: /bin/bash
+    creates: /usr/local/bin/kubectl
+  tags:
+    - skip_ansible_lint
+
+# Shell Enhancements (Aliases und Completion)
+- name: Ensure 'k' alias for 'kubectl' is configured system-wide
+  ansible.builtin.copy:
+    dest: /etc/profile.d/kubectl_alias.sh
+    content: |
+      alias k='/usr/local/bin/kubectl'
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure 'watch' alias is configured to enable recursive alias expansion system-wide
+  ansible.builtin.copy:
+    dest: /etc/profile.d/watch_alias.sh
+    content: |
+      alias watch='watch '
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure KUBECONFIG variable is set system-wide
+  ansible.builtin.copy:
+    dest: /etc/profile.d/kubeconfig.sh
+    content: |
+      export KUBECONFIG={{ kubeconfig_root }}
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure Helm bash completion is configured system-wide
+  ansible.builtin.copy:
+    dest: /etc/profile.d/helm_completion.sh
+    content: |
+      if [ -x /usr/local/bin/helm ]; then
+        source <(/usr/local/bin/helm completion bash)
+      fi
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure kubectl bash completion is configured system-wide
+  ansible.builtin.copy:
+    dest: /etc/profile.d/kubectl_completion.sh
+    content: |
+      if [ -x /usr/local/bin/kubectl ]; then
+        source <(/usr/local/bin/kubectl completion bash)
+      fi
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure code completion for 'k' alias system-wide
+  ansible.builtin.copy:
+    dest: /etc/profile.d/kubectl_k_completion.sh
+    content: |
+      complete -F __start_kubectl k
+    owner: root
+    group: root
+    mode: "0755"

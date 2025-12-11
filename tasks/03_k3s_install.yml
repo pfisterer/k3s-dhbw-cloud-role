@@ -1,0 +1,57 @@
+---
+# Install k3s
+- name: K3s installation
+  vars:
+    # Target IP
+    ansible_target_ip: >-
+      {% if ip_family == 'ipv4' %}
+      {{ ansible_default_ipv4.address }}
+      {% elif ip_family == 'ipv6' %}
+      {{ ansible_default_ipv6.address }}
+      {% endif %}
+    # Kubeconfig URL
+    kubeconfig_url: >-
+      {% if ip_family == 'ipv4' %}
+      https://{{ ansible_default_ipv4.address }}:6443
+      {% elif ip_family == 'ipv6' %}
+      https://[{{ ansible_default_ipv6.address }}]:6443
+      {% endif %}
+  block:
+    # k3s Installation
+    - name: Install K3s server with custom arguments
+      ansible.builtin.shell:
+        cmd: "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='{{ k3s_exec_args }}' sh -"
+        creates: /usr/local/bin/k3s
+      tags:
+        - skip_ansible_lint
+
+    - name: Wait for K3s kubeconfig to appear
+      ansible.builtin.wait_for:
+        path: "{{ kubeconfig_root }}"
+        timeout: 180
+
+    # Kubeconfig adaptation and distribution
+    - name: Replace localhost with actual node IP if present
+      ansible.builtin.replace:
+        path: "{{ kubeconfig_root }}"
+        regexp: '^(\s*server:\s+)https://127\.0\.0\.1:6443'
+        replace: '\1{{ kubeconfig_url }}'
+
+    - name: Copy kubeconfig to localhost
+      ansible.builtin.fetch:
+        src: "{{ kubeconfig_root }}"
+        dest: "./kubeconfig-{{ inventory_hostname }}.yaml"
+        flat: true
+
+    # Wait for server to be ready
+    - name: Wait for node to be ready
+      ansible.builtin.shell: /usr/local/bin/kubectl get nodes
+      environment:
+        KUBECONFIG: "{{ kubeconfig_root }}"
+      register: kubectl_check
+      until: kubectl_check.rc == 0 and 'Ready' in kubectl_check.stdout
+      retries: 24
+      delay: 5
+      changed_when: false
+      tags:
+        - skip_ansible_lint

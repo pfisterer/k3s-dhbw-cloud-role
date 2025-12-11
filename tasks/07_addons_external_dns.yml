@@ -1,0 +1,36 @@
+---
+# Deploy add-ons via Helm
+- name: Addons Deployment
+  when: rfc2136_zone is defined and rfc2136_zone != ""
+  vars:
+    external_dns_values_file: /root/external_dns_values.yaml
+  block:
+    # --- Cert Manager (Wird nur ausgeführt, wenn cert_manager_email definiert ist)
+    - name: Ensure external-dns namespace exists
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ external_dns_namespace }}"
+        kubeconfig: "{{ kubeconfig_root }}"
+
+    - name: Create {{ external_dns_values_file }} file
+      ansible.builtin.template:
+        src: external_dns_values.yaml.j2
+        dest: "{{ external_dns_values_file }}"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Install or upgrade External-DNS
+      kubernetes.core.helm:
+        name: external-dns
+        chart_ref: external-dns/external-dns
+        release_namespace: "{{ external_dns_namespace }}"
+        kubeconfig: "{{ kubeconfig_root }}"
+        state: present
+        values_files: /root/external_dns_values.yaml
+        wait: true
+        atomic: true

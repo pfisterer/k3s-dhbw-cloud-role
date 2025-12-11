@@ -1,0 +1,47 @@
+{% set rfc2136_vars_set = (
+        rfc2136_zone | default('') and 
+        rfc2136_tsig_secret_value | default('') and 
+        rfc2136_dns_tsig_secret_alg | default('') and 
+        rfc2136_tsig_secret_keyname | default('')
+    ) 
+%}
+{% set eab_required = (
+        cert_manager_eab_keyid != "" and 
+        cert_manager_eab_secret != ""
+    )
+%}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+    name: "{{external_dns_cluster_issuer_name}}"
+spec:
+    acme:
+        email: "{{ cert_manager_email }}"
+        server: "{{ cert_manager_url }}"
+
+{% if eab_required %}    
+        externalAccountBinding:
+            keyID: "{{ cert_manager_eab_keyid }}"
+            keySecretRef:
+                name: "{{ cert_manager_eab_secret_name }}"
+                key: secret
+{% endif %}
+
+        privateKeySecretRef:
+            name: "{{ cert_manager_private_key_secret_name }}"
+
+        solvers:
+{% if rfc2136_vars_set %}    
+            - dns01:
+                rfc2136:
+                    nameserver: "{{ rfc_2136_dns_host }}"
+                    tsigKeyName: "{{ rfc2136_tsig_secret_keyname }}"
+                    tsigAlgorithm: "{{ rfc2136_dns_tsig_secret_alg | replace('-', '') | upper }}"
+                    tsigSecretSecretRef:
+                        name: "{{ cert_manager_eab_secret_name }}" # the name of the k8s secret holding the TSIG key.. not the key itself!
+                        key: secret
+{% else %}
+            - http01:
+                ingress:
+                    class: nginx
+{% endif %}

@@ -1,0 +1,21 @@
+---
+- ansible.builtin.include_tasks: 01_preflight.yml
+  tags: [preflight, python]
+
+- ansible.builtin.include_tasks: 02_bootstrap.yml
+  tags: [bootstrap]
+
+- ansible.builtin.include_tasks: 03_k3s_install.yml
+  tags: [k3s]
+
+- ansible.builtin.include_tasks: 04_addons_helm.yml
+  tags: [helm]
+
+- ansible.builtin.include_tasks: 05_addons_ingress_nginx.yml
+  tags: [ingress]
+
+- ansible.builtin.include_tasks: 06_addons_cert_manager.yml
+  tags: [certmanager]
+
+- ansible.builtin.include_tasks: 07_addons_external_dns.yml
+  tags: [externaldns]

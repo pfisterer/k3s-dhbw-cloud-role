@@ -1,0 +1,28 @@
+---
+# --- Ingress-NGINX Controller Deployment via Helm ---
+- name: Ensure ingress-nginx namespace exists
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: ingress-nginx
+    kubeconfig: "{{ kubeconfig_root }}"
+
+- name: Install or upgrade NGINX Ingress Controller
+  kubernetes.core.helm:
+    name: ingress-nginx
+    chart_ref: ingress-nginx/ingress-nginx
+    release_namespace: ingress-nginx
+    kubeconfig: "{{ kubeconfig_root }}"
+    state: present
+    values:
+      controller:
+        service:
+          type: LoadBalancer
+        watchIngressWithoutClass: true
+        config:
+          strict-validate-path-type: false
+    wait: true
+    atomic: true

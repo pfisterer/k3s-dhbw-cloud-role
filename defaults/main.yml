@@ -1,0 +1,67 @@
+# -----------------------------------------------------------------------------
+## 🌟 General & Network Settings
+# -----------------------------------------------------------------------------
+# The IP family type (ipv4 or ipv6). Determines which interface address is used for generating TLS certificates
+# and setting the kubeconfig server URL.
+ip_family: "ipv4"
+
+# -----------------------------------------------------------------------------
+## 🚀 K3s Server Configuration
+# -----------------------------------------------------------------------------
+# K3s installation arguments passed to the install script (via INSTALL_K3S_EXEC).
+# Traefik is disabled by default to allow for a dedicated Ingress controller (e.g., NGINX).
+# The --tls-san value is dynamically calculated in the tasks to match the node's
+# external IP, ensuring external kubeconfig access works without TLS errors.
+k3s_exec_args: "--disable=traefik --tls-san={{ ansible_target_ip }}"
+
+# Standard path where K3s stores the main kubeconfig file on the node.
+kubeconfig_root: /etc/rancher/k3s/k3s.yaml
+
+# -----------------------------------------------------------------------------
+## 📦 Helm Repository Management
+# -----------------------------------------------------------------------------
+# Helm Repositories to add on the node before installing any charts.
+helm_repos:
+  - { name: ingress-nginx, url: https://kubernetes.github.io/ingress-nginx/ } # NGINX Ingress Controller
+  - { name: jetstack, url: https://charts.jetstack.io } # cert-manager chart repository
+  - { name: external-dns, url: https://kubernetes-sigs.github.io/external-dns/ } # external-dns
+
+# -----------------------------------------------------------------------------
+## 🔒 Add-on: Cert-Manager with ClusterIssuer
+# -----------------------------------------------------------------------------
+
+# IMPORTANT: The cert-manager installation and ClusterIssuer tasks will be
+# skipped if 'cert_manager_email' is an empty string ("").
+# The email address required for ACME account registration (mandatory for Let's Encrypt).
+cert_manager_email: "" # e.g., "admin@yourdomain.com"
+
+# The ACME server URL for the ClusterIssuer definition.
+# Uses DHBW-internal ACME server (only accessible from within DHBW networks or VPNs)
+cert_manager_url: "https://certificates.services.dhbw.cloud"
+
+cert_manager_private_key_secret_name: "cert-manager-private-key-secret"
+
+# External Account Binding (EAB) details: Required only for specific commercial CAs.
+# If EAB is not required, leave both variables as empty strings.
+cert_manager_eab_keyid: "" # Optional: The Key ID provided by the external CA
+cert_manager_eab_secret: "" # Optional: MAC key (will be stored in a Secret and be base64 encoded there)
+cert_manager_eab_secret_name: "cert-manager-eab-secret"
+
+# Namespace in which cert-manager will be deployed
+cert_manager_namespace: cert-manager
+
+# -----------------------------------------------------------------------------
+## 🌐 Add-on: External DNS
+# -----------------------------------------------------------------------------
+
+external_dns_namespace: external-dns
+external_dns_version: "v0.19.0"
+external_dns_log_level: "debug"
+external_dns_cluster_issuer_name: certificate-cluster-issuer
+
+rfc_2136_dns_host: "141.72.5.244"
+rfc_2136_dns_port: 53
+#rfc2136_zone: your-zone.example.com
+#rfc2136_tsig_secret_value: some_value
+#rfc2136_dns_tsig_secret_alg: hmac-sha512
+#rfc2136_tsig_secret_keyname: user-key-9a0b9a1b08cf7044c124d38b77d34354545

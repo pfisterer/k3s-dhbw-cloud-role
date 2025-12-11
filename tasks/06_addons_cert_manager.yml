@@ -1,0 +1,51 @@
+---
+# --- Cert Manager (installed only when cert_manager_email is defined and not empty)
+- name: Addons Deployment
+  when: cert_manager_email is defined and cert_manager_email != ""
+  block:
+    # --- Namespace
+    - name: Ensure cert-manager namespace exists
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ cert_manager_namespace }}"
+        kubeconfig: "{{ kubeconfig_root }}"
+
+    # --- Install helm chart
+    - name: Install or upgrade Cert-Manager
+      kubernetes.core.helm:
+        name: cert-manager
+        chart_ref: jetstack/cert-manager
+        release_namespace: "{{ cert_manager_namespace }}"
+        kubeconfig: "{{ kubeconfig_root }}"
+        state: present
+        values:
+          installCRDs: true
+        wait: true
+        atomic: true
+
+    # --- EAB secret (if required)
+    - name: EAB secret
+      when: cert_manager_eab_keyid != "" and cert_manager_eab_secret != ""
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_root }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ cert_manager_eab_secret_name }}"
+            namespace: "{{ cert_manager_namespace }}"
+          type: Opaque
+          data:
+            secret: "{{ cert_manager_eab_secret | b64encode }}"
+
+    # --- ClusterIssuer
+    - name: Apply cert-manager ClusterIssuer for Let's Encrypt Production
+      kubernetes.core.k8s:
+        template: "cluster_issuer.yaml.j2"
+        kubeconfig: "{{ kubeconfig_root }}"
+        state: present
