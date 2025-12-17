@@ -49,7 +49,6 @@ all:
 
             cert_manager_email: your@mail.com
             external_dns_cluster_issuer_name: cluster-issuer
-            acme2acme_hostname: acme2acme.some.zone.example.com
 ```
 
 ### Playbook Example
