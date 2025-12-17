@@ -21,7 +21,7 @@ kubeconfig_root: /etc/rancher/k3s/k3s.yaml
 ## 📦 Helm Repository Management
 # -----------------------------------------------------------------------------
 # Helm Repositories to add on the node before installing any charts.
-helm_repos:
+k3s_role_helm_repos:
   - { name: ingress-nginx, url: https://kubernetes.github.io/ingress-nginx/ } # NGINX Ingress Controller
   - { name: jetstack, url: https://charts.jetstack.io } # cert-manager chart repository
   - { name: external-dns, url: https://kubernetes-sigs.github.io/external-dns/ } # external-dns

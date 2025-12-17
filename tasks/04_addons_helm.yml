@@ -11,4 +11,4 @@
     name: "{{ item.name }}"
     repo_url: "{{ item.url }}"
     state: present
-  loop: "{{ helm_repos }}"
+  loop: "{{ k3s_role_helm_repos }}"
