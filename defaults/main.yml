@@ -37,7 +37,7 @@ cert_manager_email: "" # e.g., "admin@yourdomain.com"
 
 # The ACME server URL for the ClusterIssuer definition.
 # Uses DHBW-internal ACME server (only accessible from within DHBW networks or VPNs)
-cert_manager_url: "https://certificates.services.dhbw.cloud"
+cert_manager_url: "https://certificates.dhbw.cloud"
 
 cert_manager_private_key_secret_name: "cert-manager-private-key-secret"
 
