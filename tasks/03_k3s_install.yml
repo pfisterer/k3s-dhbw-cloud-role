@@ -52,15 +52,6 @@
       tags:
         - skip_ansible_lint
 
-    - name: Read cluster join token
-      ansible.builtin.slurp:
-        src: /var/lib/rancher/k3s/server/node-token
-      register: k3s_token_slurp
-
-    - name: Expose join token as host fact
-      ansible.builtin.set_fact:
-        k3s_node_token: "{{ k3s_token_slurp['content'] | b64decode | trim }}"
-
 # ── AGENT INSTALL ──────────────────────────────────────────────────────────────
 - name: K3s agent installation
   when: k3s_role == 'agent'
@@ -69,11 +60,23 @@
       ansible.builtin.assert:
         that:
           - k3s_server_host | length > 0
-          - k3s_token | length > 0
         fail_msg: >
-          k3s_role is 'agent' but k3s_server_host or k3s_token is not set.
-          Set k3s_server_host as a group_var and pass k3s_token from the server's
-          hostvars['<server_ip>']['k3s_node_token'].
+          k3s_role is 'agent' but k3s_server_host is not set.
+          Set k3s_server_host as a group_var on the agent host group.
+
+    # Wait for the server to finish writing the token before reading it.
+    # This naturally handles the race when servers and agents run in the same play.
+    - name: Wait for server join token to be available
+      ansible.builtin.wait_for:
+        path: /var/lib/rancher/k3s/server/node-token
+        timeout: 300
+      delegate_to: "{{ k3s_server_host }}"
+
+    - name: Read join token from server
+      ansible.builtin.slurp:
+        src: /var/lib/rancher/k3s/server/node-token
+      delegate_to: "{{ k3s_server_host }}"
+      register: k3s_token_slurp
 
     - name: Install K3s agent and join cluster
       ansible.builtin.shell:
@@ -81,7 +84,7 @@
         creates: /usr/local/bin/k3s
       environment:
         K3S_URL: "https://{{ k3s_server_host }}:6443"
-        K3S_TOKEN: "{{ k3s_token }}"
+        K3S_TOKEN: "{{ k3s_token_slurp['content'] | b64decode | trim }}"
       tags:
         - skip_ansible_lint
 

@@ -55,7 +55,6 @@ all:
   become: true
   roles:
     - role: k3s-dhbw-cloud-role
-      tags: [k3s]
 ```
 
 ---
@@ -115,23 +114,14 @@ all:
 **`playbook.yml`**
 ```yaml
 ---
-# Play 1: install k3s server and all add-ons
-- name: Deploy K3s servers
-  hosts: "*_k3s_server"
+- name: Deploy K3s
+  hosts: all
   become: true
-  roles:
-    - role: k3s-dhbw-cloud-role
-
-# Play 2: join worker nodes (token is read automatically from the server's hostvars)
-- name: Join K3s agents
-  hosts: "*_k3s_agent"
-  become: true
-  vars:
-    k3s_role: agent
-    k3s_token: "{{ hostvars[k3s_server_host]['k3s_node_token'] }}"
   roles:
     - role: k3s-dhbw-cloud-role
 ```
+
+The role detects each host's role via `k3s_role`. Server and agent tasks run in the same play — agent nodes automatically wait for the server to finish writing its join token before proceeding, so no manual ordering or token passing is needed.
 
 Run a single environment:
 
@@ -151,8 +141,7 @@ All variables are defined in `defaults/main.yml` and can be overridden per host 
 | Variable | Default | Description |
 |---|---|---|
 | `k3s_role` | `server` | Set to `agent` on worker nodes. |
-| `k3s_server_host` | `""` | IP of the server to join. Required when `k3s_role: agent`. |
-| `k3s_token` | `""` | Cluster join token. Pass via `hostvars` from the server play (see example above). |
+| `k3s_server_host` | `""` | IP of the server to join. Required when `k3s_role: agent`. The join token is fetched from the server automatically. |
 
 ### General
 
