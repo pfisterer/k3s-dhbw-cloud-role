@@ -3,18 +3,18 @@
 - name: K3s installation
   vars:
     # Target IP
-    ansible_target_ip: >-
+    k3s_node_ip: >-
       {% if ip_family == 'ipv4' %}
-      {{ ansible_default_ipv4.address }}
+      {{ ansible_facts['default_ipv4']['address'] }}
       {% elif ip_family == 'ipv6' %}
-      {{ ansible_default_ipv6.address }}
+      {{ ansible_facts['default_ipv6']['address'] }}
       {% endif %}
     # Kubeconfig URL
     kubeconfig_url: >-
       {% if ip_family == 'ipv4' %}
-      https://{{ ansible_default_ipv4.address }}:6443
+      https://{{ ansible_facts['default_ipv4']['address'] }}:6443
       {% elif ip_family == 'ipv6' %}
-      https://[{{ ansible_default_ipv6.address }}]:6443
+      https://[{{ ansible_facts['default_ipv6']['address'] }}]:6443
       {% endif %}
   block:
     # k3s Installation

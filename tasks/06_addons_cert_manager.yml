@@ -44,8 +44,14 @@
             secret: "{{ cert_manager_eab_secret | b64encode }}"
 
     # --- ClusterIssuer
+    - name: Render ClusterIssuer template
+      ansible.builtin.template:
+        src: cluster_issuer.yaml.j2
+        dest: /tmp/cluster_issuer.yaml
+        mode: "0600"
+
     - name: Apply cert-manager ClusterIssuer for Let's Encrypt Production
       kubernetes.core.k8s:
-        template: "cluster_issuer.yaml.j2"
+        src: /tmp/cluster_issuer.yaml
         kubeconfig: "{{ kubeconfig_root }}"
         state: present

@@ -1,4 +1,5 @@
 ---
+
 - name: Remove conflicting helm-diff plugin directory
   ansible.builtin.file:
     path: /root/.local/share/helm/plugins/helm-diff

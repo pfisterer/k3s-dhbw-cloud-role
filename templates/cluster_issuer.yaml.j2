@@ -31,7 +31,7 @@ spec:
             name: "{{ cert_manager_private_key_secret_name }}"
 
         solvers:
-{% if rfc2136_vars_set %}    
+{% if rfc2136_vars_set and cert_manager_preferred_challenge == 'dns01' %}
             - dns01:
                 rfc2136:
                     nameserver: "{{ rfc_2136_dns_host }}"

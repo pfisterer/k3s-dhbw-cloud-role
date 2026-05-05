@@ -12,7 +12,7 @@ ip_family: "ipv4"
 # Traefik is disabled by default to allow for a dedicated Ingress controller (e.g., NGINX).
 # The --tls-san value is dynamically calculated in the tasks to match the node's
 # external IP, ensuring external kubeconfig access works without TLS errors.
-k3s_exec_args: "--disable=traefik --tls-san={{ ansible_target_ip }}"
+k3s_exec_args: "--disable=traefik --tls-san={{ k3s_node_ip }}"
 
 # Standard path where K3s stores the main kubeconfig file on the node.
 kubeconfig_root: /etc/rancher/k3s/k3s.yaml
@@ -49,6 +49,9 @@ cert_manager_eab_secret_name: "cert-manager-eab-secret"
 
 # Namespace in which cert-manager will be deployed
 cert_manager_namespace: cert-manager
+
+# Set to http01 or dns01 (e.g., for wildcard certificates)
+cert_manager_preferred_challenge: http01
 
 # -----------------------------------------------------------------------------
 ## 🌐 Add-on: External DNS
