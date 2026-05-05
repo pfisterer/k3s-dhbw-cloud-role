@@ -10,12 +10,16 @@
 
 - ansible.builtin.include_tasks: 04_addons_helm.yml
   tags: [helm]
+  when: k3s_role == 'server'
 
 - ansible.builtin.include_tasks: 05_addons_ingress_nginx.yml
   tags: [ingress]
+  when: k3s_role == 'server'
 
 - ansible.builtin.include_tasks: 06_addons_cert_manager.yml
   tags: [certmanager]
+  when: k3s_role == 'server'
 
 - ansible.builtin.include_tasks: 07_addons_external_dns.yml
   tags: [externaldns]
+  when: k3s_role == 'server'

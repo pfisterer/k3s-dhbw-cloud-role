@@ -6,6 +6,22 @@
 ip_family: "ipv4"
 
 # -----------------------------------------------------------------------------
+## 🚀 K3s Node Role
+# -----------------------------------------------------------------------------
+# Set to "server" for the control-plane node or "agent" for worker nodes.
+# Server nodes run the full k3s stack and all add-ons.
+# Agent nodes join an existing cluster and skip all add-on installation.
+k3s_role: "server"
+
+# For agent nodes: the IP address of the k3s server to join.
+# Typically set as a group_var on the agent host group (e.g., k3s_server_host: "1.2.3.4").
+k3s_server_host: ""
+
+# For agent nodes: the cluster join token. Usually sourced from hostvars of the server node
+# after the server play has run (k3s_node_token is registered there).
+k3s_token: ""
+
+# -----------------------------------------------------------------------------
 ## 🚀 K3s Server Configuration
 # -----------------------------------------------------------------------------
 # K3s installation arguments passed to the install script (via INSTALL_K3S_EXEC).
