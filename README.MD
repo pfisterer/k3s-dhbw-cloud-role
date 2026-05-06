@@ -74,6 +74,8 @@ all:
     production:
       children:
         production_k3s_server:
+          vars:
+            k3s_role: server
           hosts:
             "141.72.5.244":
               ansible_user: root
@@ -83,6 +85,7 @@ all:
 
         production_k3s_agent:
           vars:
+            k3s_role: agent
             k3s_server_host: "141.72.5.244"   # must match the server host above
           hosts:
             "141.72.5.101":
@@ -96,6 +99,8 @@ all:
     staging:
       children:
         staging_k3s_server:
+          vars:
+            k3s_role: server
           hosts:
             "141.72.176.135":
               ansible_user: root
@@ -105,6 +110,7 @@ all:
 
         staging_k3s_agent:
           vars:
+            k3s_role: agent
             k3s_server_host: "141.72.176.135"
           hosts:
             "141.72.176.201":

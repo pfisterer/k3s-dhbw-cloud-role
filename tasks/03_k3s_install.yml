@@ -2,6 +2,7 @@
 # ── SERVER INSTALL ─────────────────────────────────────────────────────────────
 - name: K3s server installation
   when: k3s_role == 'server'
+  become: true
   vars:
     k3s_node_ip: >-
       {% if ip_family == 'ipv4' %}
@@ -55,6 +56,7 @@
 # ── AGENT INSTALL ──────────────────────────────────────────────────────────────
 - name: K3s agent installation
   when: k3s_role == 'agent'
+  become: true
   block:
     - name: Validate required agent variables
       ansible.builtin.assert:
@@ -70,12 +72,12 @@
       ansible.builtin.wait_for:
         path: /var/lib/rancher/k3s/server/node-token
         timeout: 300
-      delegate_to: "{{ k3s_server_host }}"
+      delegate_to: "{{ k3s_server_host | default(inventory_hostname, true) }}"
 
     - name: Read join token from server
       ansible.builtin.slurp:
         src: /var/lib/rancher/k3s/server/node-token
-      delegate_to: "{{ k3s_server_host }}"
+      delegate_to: "{{ k3s_server_host | default(inventory_hostname, true) }}"
       register: k3s_token_slurp
 
     - name: Install K3s agent and join cluster

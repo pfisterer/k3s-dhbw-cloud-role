@@ -2,6 +2,7 @@
 # --- Cert Manager (installed only when cert_manager_email is defined and not empty)
 - name: Addons Deployment
   when: cert_manager_email is defined and cert_manager_email != ""
+  become: true
   block:
     # --- Namespace
     - name: Ensure cert-manager namespace exists

@@ -1,6 +1,7 @@
 ---
 # Install APT packages and tools
 - name: Ensure apt packages installed
+  become: true
   ansible.builtin.apt:
     name:
       - curl
@@ -10,6 +11,7 @@
     cache_valid_time: 86400
 
 - name: Ensure Helm is installed
+  become: true
   ansible.builtin.shell: |
     curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
   args:
@@ -20,6 +22,7 @@
     - "ansible-lint:command-instead-of-shell"
 
 - name: Ensure Skaffold is installed
+  become: true
   ansible.builtin.shell: |
     curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64 && \
     install skaffold /usr/local/bin/ && \
@@ -31,6 +34,7 @@
     - skip_ansible_lint
 
 - name: Ensure kubectl is installed
+  become: true
   ansible.builtin.shell: |
     curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && \
     install -m 755 kubectl /usr/local/bin/kubectl && \
@@ -43,6 +47,7 @@
 
 # Shell Enhancements (Aliases und Completion)
 - name: Ensure 'k' alias for 'kubectl' is configured system-wide
+  become: true
   ansible.builtin.copy:
     dest: /etc/profile.d/kubectl_alias.sh
     content: |
@@ -52,6 +57,7 @@
     mode: "0755"
 
 - name: Ensure 'watch' alias is configured to enable recursive alias expansion system-wide
+  become: true
   ansible.builtin.copy:
     dest: /etc/profile.d/watch_alias.sh
     content: |
@@ -61,6 +67,7 @@
     mode: "0755"
 
 - name: Ensure KUBECONFIG variable is set system-wide
+  become: true
   ansible.builtin.copy:
     dest: /etc/profile.d/kubeconfig.sh
     content: |
@@ -70,6 +77,7 @@
     mode: "0755"
 
 - name: Ensure Helm bash completion is configured system-wide
+  become: true
   ansible.builtin.copy:
     dest: /etc/profile.d/helm_completion.sh
     content: |
@@ -81,6 +89,7 @@
     mode: "0755"
 
 - name: Ensure kubectl bash completion is configured system-wide
+  become: true
   ansible.builtin.copy:
     dest: /etc/profile.d/kubectl_completion.sh
     content: |
@@ -92,6 +101,7 @@
     mode: "0755"
 
 - name: Ensure code completion for 'k' alias system-wide
+  become: true
   ansible.builtin.copy:
     dest: /etc/profile.d/kubectl_k_completion.sh
     content: |

@@ -7,6 +7,7 @@
 
 - name: Install minimal Python 3 using 'raw' module if not present (Bootstrapping)
   when: python_check.rc != 0
+  become: true
   ansible.builtin.raw: apt update && apt install -y python3
   register: raw_output
   changed_when: raw_output.rc == 0
@@ -15,6 +16,7 @@
     - python
 
 - name: Ensure 'l' alias for 'ls -la' is configured
+  become: true
   ansible.builtin.copy:
     dest: /etc/profile.d/l_alias.sh
     content: |

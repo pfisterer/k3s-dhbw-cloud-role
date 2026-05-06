@@ -2,6 +2,7 @@
 # Deploy add-ons via Helm
 - name: Addons Deployment
   when: rfc2136_zone is defined and rfc2136_zone != ""
+  become: true
   vars:
     external_dns_values_file: /root/external_dns_values.yaml
   block:

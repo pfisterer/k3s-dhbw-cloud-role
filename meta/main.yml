@@ -1,7 +1,8 @@
 ---
 galaxy_info:
   author: Dennis Pfisterer, https://dennis-pfisterer.de
-  description: Installs and configures a K3s cluster, optimized for specific dhbw.cloud infrastructure requirements.
+  description: Installs and configures a K3s cluster, optimized for specific
+    dhbw.cloud infrastructure requirements.
   company: DHBW
   license: Apache-2.0
 
@@ -10,11 +11,15 @@ galaxy_info:
   platforms:
     - name: Ubuntu
       versions:
-        - "jammy" # 22.04 LTS
+        - "resolute" # 26.04 LTS
+        - "questing" # 25.10
+        - "plucky" # 25.04
         - "noble" # 24.04 LTS
+        - "jammy" # 22.04 LTS
 
     - name: Debian
       versions:
+        - "forky" # Debian 14
         - "trixie" # Debian 13
         - "bookworm" # Debian 12
 
@@ -24,5 +29,6 @@ galaxy_info:
     - cluster
     - deployment
     - cloud
+    - DHBW
 
 dependencies: []
