@@ -30,6 +30,7 @@ txtPrefix: dynamic-zones-dns-
 # ------------------------------------------------------------------------------
 extraArgs:
   - --source=ingress
+  - --source=traefik-proxy
   - --domain-filter={{ rfc2136_zone }}
   - --rfc2136-host={{ rfc_2136_dns_host }}
   - --rfc2136-port={{ rfc_2136_dns_port }}

@@ -14,7 +14,7 @@
 
 - ansible.builtin.include_tasks: 05_addons_ingress_nginx.yml
   tags: [ingress]
-  when: k3s_role == 'server'
+  when: k3s_role == 'server' and ingress_nginx_enabled | bool
 
 - ansible.builtin.include_tasks: 06_addons_cert_manager.yml
   tags: [certmanager]

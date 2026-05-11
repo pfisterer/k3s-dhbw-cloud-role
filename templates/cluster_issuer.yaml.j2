@@ -43,5 +43,5 @@ spec:
 {% else %}
             - http01:
                 ingress:
-                    class: nginx
+                    class: "{{ 'nginx' if ingress_nginx_enabled else 'traefik' }}"
 {% endif %}

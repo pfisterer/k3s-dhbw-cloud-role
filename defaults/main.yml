@@ -25,17 +25,22 @@ k3s_server_host: ""
 # Traefik is disabled by default to allow for a dedicated Ingress controller (e.g., NGINX).
 # The --tls-san value is dynamically calculated in the tasks to match the node's
 # external IP, ensuring external kubeconfig access works without TLS errors.
-k3s_exec_args: "--disable=traefik --tls-san={{ k3s_node_ip }}"
+k3s_exec_args: "{{ '--disable=traefik ' if ingress_nginx_enabled else '' }}--tls-san={{ k3s_node_ip }}"
 
 # Standard path where K3s stores the main kubeconfig file on the node.
 kubeconfig_root: /etc/rancher/k3s/k3s.yaml
+
+# -----------------------------------------------------------------------------
+## 🔌 Add-on: NGINX Ingress Controller
+# -----------------------------------------------------------------------------
+# Set to false to skip installing the NGINX Ingress Controller.
+ingress_nginx_enabled: true
 
 # -----------------------------------------------------------------------------
 ## 📦 Helm Repository Management
 # -----------------------------------------------------------------------------
 # Helm Repositories to add on the node before installing any charts.
 k3s_role_helm_repos:
-  - { name: ingress-nginx, url: https://kubernetes.github.io/ingress-nginx/ } # NGINX Ingress Controller
   - { name: jetstack, url: https://charts.jetstack.io } # cert-manager chart repository
   - { name: external-dns, url: https://kubernetes-sigs.github.io/external-dns/ } # external-dns
 
