@@ -39,3 +39,19 @@ extraArgs:
   - --rfc2136-tsig-secret-alg={{ rfc2136_dns_tsig_secret_alg }}
   - --rfc2136-tsig-keyname={{ rfc2136_tsig_secret_keyname }}
   - --rfc2136-tsig-axfr
+
+# ------------------------------------------------------------------------------
+# RBAC — extra permissions for Traefik CRDs (required by --source=traefik-proxy)
+# ------------------------------------------------------------------------------
+rbac:
+  additionalPermissions:
+    - apiGroups:
+        - traefik.io
+      resources:
+        - ingressroutes
+        - ingressroutetcps
+        - ingressrouteudps
+      verbs:
+        - get
+        - list
+        - watch
