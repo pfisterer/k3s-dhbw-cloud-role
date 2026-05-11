@@ -4,7 +4,7 @@ Ansible Role for the installation and configuration of a production-ready K3s cl
 
 This role automates the bootstrapping of Linux hosts and the deployment of essential cloud-native components:
 - **K3s:** Lightweight Kubernetes distribution (server or agent mode).
-- **NGINX Ingress Controller:** For external routing of traffic.
+- **NGINX Ingress Controller:** For external routing of traffic (optional, can be disabled in favour of the built-in Traefik).
 - **Cert-Manager:** For automated issuance and renewal of TLS certificates (ACME).
 - **ExternalDNS:** For automatic management of DNS records (supports RFC2136/TSIG).
 
@@ -154,7 +154,8 @@ All variables are defined in `defaults/main.yml` and can be overridden per host 
 | Variable | Default | Description |
 |---|---|---|
 | `ip_family` | `ipv4` | IP version for TLS SANs and kubeconfig URL (`ipv4` or `ipv6`). |
-| `k3s_exec_args` | `--disable=traefik --tls-san=<node_ip>` | Arguments passed to the k3s install script. |
+| `k3s_exec_args` | _(dynamic)_ | Arguments passed to the k3s install script. `--disable=traefik` is included automatically when `ingress_nginx_enabled: true`. |
+| `ingress_nginx_enabled` | `true` | Set to `false` to skip NGINX Ingress Controller and keep the built-in Traefik instead. Also adjusts the cert-manager HTTP-01 solver class accordingly. |
 | `kubeconfig_root` | `/etc/rancher/k3s/k3s.yaml` | Path to the kubeconfig on the server node. |
 
 ### Cert-Manager
