@@ -17,7 +17,7 @@ Add the role to your requirements file (`requirements.yml`):
 ```yaml
 ---
 - name: k3s-dhbw-cloud-role
-  source: https://github.com/pfisterer/k3s-dhbw-cloud-role.git
+  src: https://github.com/pfisterer/k3s-dhbw-cloud-role.git
   # version: main
   # version: v1.0.0
 ```
@@ -144,43 +144,43 @@ All variables are defined in `defaults/main.yml` and can be overridden per host 
 
 ### Node role
 
-| Variable | Default | Description |
-|---|---|---|
-| `k3s_role` | `server` | Set to `agent` on worker nodes. |
-| `k3s_server_host` | `""` | IP of the server to join. Required when `k3s_role: agent`. The join token is fetched from the server automatically. |
+| Variable          | Default  | Description                                                                                                         |
+| ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------- |
+| `k3s_role`        | `server` | Set to `agent` on worker nodes.                                                                                     |
+| `k3s_server_host` | `""`     | IP of the server to join. Required when `k3s_role: agent`. The join token is fetched from the server automatically. |
 
 ### General
 
-| Variable | Default | Description |
-|---|---|---|
-| `ip_family` | `ipv4` | IP version for TLS SANs and kubeconfig URL (`ipv4` or `ipv6`). |
-| `k3s_exec_args` | _(dynamic)_ | Arguments passed to the k3s install script. `--disable=traefik` is included automatically when `ingress_nginx_enabled: true`. |
-| `ingress_nginx_enabled` | `true` | Set to `false` to skip NGINX Ingress Controller and keep the built-in Traefik instead. Also adjusts the cert-manager HTTP-01 solver class accordingly. |
-| `kubeconfig_root` | `/etc/rancher/k3s/k3s.yaml` | Path to the kubeconfig on the server node. |
+| Variable                | Default                     | Description                                                                                                                                            |
+| ----------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ip_family`             | `ipv4`                      | IP version for TLS SANs and kubeconfig URL (`ipv4` or `ipv6`).                                                                                         |
+| `k3s_exec_args`         | _(dynamic)_                 | Arguments passed to the k3s install script. `--disable=traefik` is included automatically when `ingress_nginx_enabled: true`.                          |
+| `ingress_nginx_enabled` | `true`                      | Set to `false` to skip NGINX Ingress Controller and keep the built-in Traefik instead. Also adjusts the cert-manager HTTP-01 solver class accordingly. |
+| `kubeconfig_root`       | `/etc/rancher/k3s/k3s.yaml` | Path to the kubeconfig on the server node.                                                                                                             |
 
 ### Cert-Manager
 
-| Variable | Default | Description |
-|---|---|---|
-| `cert_manager_email` | `""` | ACME account email. Leave empty to skip cert-manager installation. |
-| `cert_manager_url` | `https://certificates.dhbw.cloud` | ACME server URL. |
-| `cert_manager_namespace` | `cert-manager` | Deployment namespace. |
-| `cert_manager_preferred_challenge` | `http01` | Challenge type: `http01` or `dns01`. |
-| `cert_manager_eab_keyid` | `""` | External Account Binding Key ID (optional). |
-| `cert_manager_eab_secret` | `""` | External Account Binding MAC key (optional). |
+| Variable                           | Default                           | Description                                                        |
+| ---------------------------------- | --------------------------------- | ------------------------------------------------------------------ |
+| `cert_manager_email`               | `""`                              | ACME account email. Leave empty to skip cert-manager installation. |
+| `cert_manager_url`                 | `https://certificates.dhbw.cloud` | ACME server URL.                                                   |
+| `cert_manager_namespace`           | `cert-manager`                    | Deployment namespace.                                              |
+| `cert_manager_preferred_challenge` | `http01`                          | Challenge type: `http01` or `dns01`.                               |
+| `cert_manager_eab_keyid`           | `""`                              | External Account Binding Key ID (optional).                        |
+| `cert_manager_eab_secret`          | `""`                              | External Account Binding MAC key (optional).                       |
 
 ### ExternalDNS (RFC2136)
 
-| Variable | Default | Description |
-|---|---|---|
-| `rfc2136_zone` | _(unset)_ | DNS zone. Leave unset to skip ExternalDNS installation. |
-| `rfc_2136_dns_host` | `141.72.5.244` | RFC2136 DNS server IP. |
-| `rfc_2136_dns_port` | `53` | RFC2136 DNS server port. |
-| `rfc2136_tsig_secret_value` | _(unset)_ | TSIG secret value. |
-| `rfc2136_dns_tsig_secret_alg` | _(unset)_ | TSIG algorithm (e.g. `hmac-sha512`). |
-| `rfc2136_tsig_secret_keyname` | _(unset)_ | TSIG key name. |
-| `external_dns_cluster_issuer_name` | `certificate-cluster-issuer` | Name of the ClusterIssuer to annotate ingresses with. |
-| `external_dns_version` | `v0.19.0` | ExternalDNS Helm chart version. |
+| Variable                           | Default                      | Description                                             |
+| ---------------------------------- | ---------------------------- | ------------------------------------------------------- |
+| `rfc2136_zone`                     | _(unset)_                    | DNS zone. Leave unset to skip ExternalDNS installation. |
+| `rfc_2136_dns_host`                | `141.72.5.244`               | RFC2136 DNS server IP.                                  |
+| `rfc_2136_dns_port`                | `53`                         | RFC2136 DNS server port.                                |
+| `rfc2136_tsig_secret_value`        | _(unset)_                    | TSIG secret value.                                      |
+| `rfc2136_dns_tsig_secret_alg`      | _(unset)_                    | TSIG algorithm (e.g. `hmac-sha512`).                    |
+| `rfc2136_tsig_secret_keyname`      | _(unset)_                    | TSIG key name.                                          |
+| `external_dns_cluster_issuer_name` | `certificate-cluster-issuer` | Name of the ClusterIssuer to annotate ingresses with.   |
+| `external_dns_version`             | `v0.19.0`                    | ExternalDNS Helm chart version.                         |
 
 ---
 
