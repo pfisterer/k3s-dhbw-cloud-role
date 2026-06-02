@@ -1,7 +1,7 @@
 {% set rfc2136_vars_set = (
         rfc2136_zone | default('') and 
         rfc2136_tsig_secret_value | default('') and 
-        rfc2136_dns_tsig_secret_alg | default('') and 
+        rfc2136_tsig_secret_alg | default('') and
         rfc2136_tsig_secret_keyname | default('')
     ) 
 %}
@@ -13,7 +13,7 @@
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
-    name: "{{external_dns_cluster_issuer_name}}"
+    name: "{{ cert_manager_cluster_issuer_name }}"
 spec:
     acme:
         email: "{{ cert_manager_email }}"
@@ -34,11 +34,11 @@ spec:
 {% if rfc2136_vars_set and cert_manager_preferred_challenge == 'dns01' %}
             - dns01:
                 rfc2136:
-                    nameserver: "{{ ('[' + rfc_2136_dns_host + ']') if ':' in rfc_2136_dns_host else rfc_2136_dns_host }}:{{ rfc_2136_dns_port }}"
+                    nameserver: "{{ ('[' + rfc2136_dns_host + ']') if ':' in rfc2136_dns_host else rfc2136_dns_host }}:{{ rfc2136_dns_port }}"
                     tsigKeyName: "{{ rfc2136_tsig_secret_keyname }}"
-                    tsigAlgorithm: "{{ rfc2136_dns_tsig_secret_alg | replace('-', '') | upper }}"
+                    tsigAlgorithm: "{{ rfc2136_tsig_secret_alg | replace('-', '') | upper }}"
                     tsigSecretSecretRef:
-                        name: "{{ cert_manager_rfc2136_tsig_secret_name }}" # k8s Secret with the TSIG key, created in 06_addons_cert_manager.yml
+                        name: "{{ cert_manager_rfc2136_tsig_secret_name }}" # k8s Secret with the TSIG key, created in 07_addons_cert_manager.yml
                         key: secret
 {% else %}
             - http01:

@@ -6,7 +6,7 @@
   vars:
     external_dns_values_file: /root/external_dns_values.yaml
   block:
-    # --- Cert Manager (Wird nur ausgeführt, wenn cert_manager_email definiert ist)
+    # --- Namespace
     - name: Ensure external-dns namespace exists
       kubernetes.core.k8s:
         state: present
@@ -17,7 +17,7 @@
             name: "{{ external_dns_namespace }}"
         kubeconfig: "{{ kubeconfig_root }}"
 
-    - name: Create {{ external_dns_values_file }} file
+    - name: Render external-dns Helm values file
       ansible.builtin.template:
         src: external_dns_values.yaml.j2
         dest: "{{ external_dns_values_file }}"
@@ -32,6 +32,6 @@
         release_namespace: "{{ external_dns_namespace }}"
         kubeconfig: "{{ kubeconfig_root }}"
         state: present
-        values_files: /root/external_dns_values.yaml
+        values_files: "{{ external_dns_values_file }}"
         wait: true
         atomic: true

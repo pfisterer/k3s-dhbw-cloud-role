@@ -4,7 +4,7 @@
   when: k3s_role == 'server'
   become: true
   vars:
-    # Use the explicit override when set, otherwise the args computed in 00_network.yml.
+    # Use the explicit override when set, otherwise the args computed in 03_network.yml.
     _k3s_server_exec_args: "{{ k3s_exec_args if (k3s_exec_args | length > 0) else _k3s_exec_args }}"
     kubeconfig_url: "{{ _kubeconfig_url }}"
   block:

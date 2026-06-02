@@ -1,0 +1,85 @@
+---
+# --- Longhorn distributed block storage (installed only when longhorn_enabled) ---
+# Node prerequisites (open-iscsi, nfs-common, iscsid, iscsi_tcp) are installed on
+# every node in 02_bootstrap.yml; this file only deploys the cluster components.
+- name: Longhorn deployment
+  when: longhorn_enabled | bool
+  become: true
+  block:
+    # Validate the replica count against the *actual* cluster size before installing.
+    # By this point (after 04_k3s_install) all agents in this run have joined, so the
+    # node list reflects the real cluster. Abort early on a nonsensical setting rather
+    # than installing Longhorn with replicas that can never be scheduled.
+    - name: Get cluster node count
+      kubernetes.core.k8s_info:
+        kind: Node
+        kubeconfig: "{{ kubeconfig_root }}"
+      register: _cluster_nodes
+
+    - name: Validate longhorn_replica_count fits the cluster
+      ansible.builtin.assert:
+        that:
+          - longhorn_replica_count | int >= 1
+          - longhorn_replica_count | int <= (_cluster_nodes.resources | length)
+        fail_msg: >-
+          longhorn_replica_count={{ longhorn_replica_count }} is invalid for a cluster
+          with {{ _cluster_nodes.resources | length }} node(s). It must be between 1
+          and the number of nodes — otherwise replicas can never be scheduled and
+          volumes stay permanently "Degraded". Lower longhorn_replica_count or add nodes.
+        success_msg: >-
+          longhorn_replica_count={{ longhorn_replica_count }} OK for
+          {{ _cluster_nodes.resources | length }} node(s).
+
+    - name: Ensure longhorn namespace exists
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ longhorn_namespace }}"
+        kubeconfig: "{{ kubeconfig_root }}"
+
+    - name: Install or upgrade Longhorn
+      kubernetes.core.helm:
+        name: longhorn
+        chart_ref: longhorn/longhorn
+        chart_version: "{{ longhorn_version or omit }}"
+        release_namespace: "{{ longhorn_namespace }}"
+        kubeconfig: "{{ kubeconfig_root }}"
+        state: present
+        values:
+          persistence:
+            defaultClass: "{{ longhorn_default_storage_class | bool }}"
+            defaultClassReplicaCount: "{{ longhorn_replica_count | int }}"
+          defaultSettings:
+            defaultReplicaCount: "{{ longhorn_replica_count | int }}"
+        wait: true
+        # Longhorn pulls several images and rolls out CRDs + DaemonSets, so give it
+        # more time than the module default before atomic would roll the release back.
+        wait_timeout: "10m0s"
+        atomic: true
+
+    # When Longhorn should be the default StorageClass, drop the default flag from
+    # the k3s-shipped local-path SC so the cluster has exactly one default.
+    - name: Check for the local-path StorageClass
+      kubernetes.core.k8s_info:
+        kind: StorageClass
+        name: local-path
+        kubeconfig: "{{ kubeconfig_root }}"
+      register: _local_path_sc
+      when: longhorn_default_storage_class | bool
+
+    - name: Unset local-path as the default StorageClass
+      kubernetes.core.k8s:
+        state: patched
+        kind: StorageClass
+        name: local-path
+        kubeconfig: "{{ kubeconfig_root }}"
+        definition:
+          metadata:
+            annotations:
+              storageclass.kubernetes.io/is-default-class: "false"
+      when:
+        - longhorn_default_storage_class | bool
+        - _local_path_sc.resources | default([]) | length > 0

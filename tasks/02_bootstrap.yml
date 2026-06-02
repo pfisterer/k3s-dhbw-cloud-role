@@ -1,114 +1,127 @@
 ---
-# Install APT packages and tools
-- name: Ensure apt packages installed
+# Base packages needed on every node (curl is used by the k3s install script).
+- name: Ensure base apt packages are installed
   become: true
   ansible.builtin.apt:
     name:
       - curl
-      - python3-kubernetes
     state: present
     update_cache: true
     cache_valid_time: 86400
 
-- name: Ensure Helm is installed
+# ─────────────────────────────────────────────────────────────────────────────
+# Client / developer tooling (Helm, kubectl, Skaffold, aliases, completions).
+# Only meaningful on the server node — agents have no kubeconfig — so install it
+# there and only when bootstrap_install_client_tools is enabled. python3-kubernetes
+# (used by the kubernetes.core/helm modules) is likewise only needed on the server.
+# ─────────────────────────────────────────────────────────────────────────────
+- name: Install client/developer tooling on the server node
   become: true
-  ansible.builtin.shell: |
-    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-  args:
-    executable: /bin/bash
-    creates: /usr/local/bin/helm
-  tags:
-    - skip_ansible_lint
-    - "ansible-lint:command-instead-of-shell"
+  when:
+    - k3s_role == 'server'
+    - bootstrap_install_client_tools | bool
+  block:
+    - name: Ensure python3-kubernetes is installed (for Ansible k8s/helm modules)
+      ansible.builtin.apt:
+        name:
+          - python3-kubernetes
+        state: present
+        update_cache: true
+        cache_valid_time: 86400
 
-- name: Ensure Skaffold is installed
-  become: true
-  ansible.builtin.shell: |
-    curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64 && \
-    install skaffold /usr/local/bin/ && \
-    rm skaffold
-  args:
-    executable: /bin/bash
-    creates: /usr/local/bin/skaffold
-  tags:
-    - skip_ansible_lint
+    - name: Ensure Helm is installed
+      ansible.builtin.shell: |
+        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 \
+          | {{ ('DESIRED_VERSION=' ~ helm_version ~ ' ') if (helm_version | length > 0) else '' }}bash
+      args:
+        executable: /bin/bash
+        creates: /usr/local/bin/helm
+      tags:
+        - skip_ansible_lint
+        - "ansible-lint:command-instead-of-shell"
 
-- name: Ensure kubectl is installed
-  become: true
-  ansible.builtin.shell: |
-    curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && \
-    install -m 755 kubectl /usr/local/bin/kubectl && \
-    rm kubectl
-  args:
-    executable: /bin/bash
-    creates: /usr/local/bin/kubectl
-  tags:
-    - skip_ansible_lint
+    - name: Ensure Skaffold is installed
+      ansible.builtin.shell: |
+        curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/{{ skaffold_version }}/skaffold-linux-amd64 && \
+        install skaffold /usr/local/bin/ && \
+        rm skaffold
+      args:
+        executable: /bin/bash
+        creates: /usr/local/bin/skaffold
+      tags:
+        - skip_ansible_lint
 
-# Shell Enhancements (Aliases und Completion)
-- name: Ensure 'k' alias for 'kubectl' is configured system-wide
-  become: true
-  ansible.builtin.copy:
-    dest: /etc/profile.d/kubectl_alias.sh
-    content: |
-      alias k='/usr/local/bin/kubectl'
-    owner: root
-    group: root
-    mode: "0755"
+    - name: Ensure kubectl is installed
+      ansible.builtin.shell: |
+        VERSION="{{ kubectl_version }}"
+        if [ -z "$VERSION" ]; then VERSION="$(curl -Ls https://dl.k8s.io/release/stable.txt)"; fi
+        curl -LO "https://dl.k8s.io/release/${VERSION}/bin/linux/amd64/kubectl" && \
+        install -m 755 kubectl /usr/local/bin/kubectl && \
+        rm kubectl
+      args:
+        executable: /bin/bash
+        creates: /usr/local/bin/kubectl
+      tags:
+        - skip_ansible_lint
 
-- name: Ensure 'watch' alias is configured to enable recursive alias expansion system-wide
-  become: true
-  ansible.builtin.copy:
-    dest: /etc/profile.d/watch_alias.sh
-    content: |
-      alias watch='watch '
-    owner: root
-    group: root
-    mode: "0755"
+    # Shell Enhancements (Aliases und Completion)
+    - name: Ensure 'k' alias for 'kubectl' is configured system-wide
+      ansible.builtin.copy:
+        dest: /etc/profile.d/kubectl_alias.sh
+        content: |
+          alias k='/usr/local/bin/kubectl'
+        owner: root
+        group: root
+        mode: "0755"
 
-- name: Ensure KUBECONFIG variable is set system-wide
-  become: true
-  ansible.builtin.copy:
-    dest: /etc/profile.d/kubeconfig.sh
-    content: |
-      export KUBECONFIG={{ kubeconfig_root }}
-    owner: root
-    group: root
-    mode: "0755"
+    - name: Ensure 'watch' alias is configured to enable recursive alias expansion system-wide
+      ansible.builtin.copy:
+        dest: /etc/profile.d/watch_alias.sh
+        content: |
+          alias watch='watch '
+        owner: root
+        group: root
+        mode: "0755"
 
-- name: Ensure Helm bash completion is configured system-wide
-  become: true
-  ansible.builtin.copy:
-    dest: /etc/profile.d/helm_completion.sh
-    content: |
-      if [ -x /usr/local/bin/helm ]; then
-        source <(/usr/local/bin/helm completion bash)
-      fi
-    owner: root
-    group: root
-    mode: "0755"
+    - name: Ensure KUBECONFIG variable is set system-wide
+      ansible.builtin.copy:
+        dest: /etc/profile.d/kubeconfig.sh
+        content: |
+          export KUBECONFIG={{ kubeconfig_root }}
+        owner: root
+        group: root
+        mode: "0755"
 
-- name: Ensure kubectl bash completion is configured system-wide
-  become: true
-  ansible.builtin.copy:
-    dest: /etc/profile.d/kubectl_completion.sh
-    content: |
-      if [ -x /usr/local/bin/kubectl ]; then
-        source <(/usr/local/bin/kubectl completion bash)
-      fi
-    owner: root
-    group: root
-    mode: "0755"
+    - name: Ensure Helm bash completion is configured system-wide
+      ansible.builtin.copy:
+        dest: /etc/profile.d/helm_completion.sh
+        content: |
+          if [ -x /usr/local/bin/helm ]; then
+            source <(/usr/local/bin/helm completion bash)
+          fi
+        owner: root
+        group: root
+        mode: "0755"
 
-- name: Ensure code completion for 'k' alias system-wide
-  become: true
-  ansible.builtin.copy:
-    dest: /etc/profile.d/kubectl_k_completion.sh
-    content: |
-      complete -F __start_kubectl k
-    owner: root
-    group: root
-    mode: "0755"
+    - name: Ensure kubectl bash completion is configured system-wide
+      ansible.builtin.copy:
+        dest: /etc/profile.d/kubectl_completion.sh
+        content: |
+          if [ -x /usr/local/bin/kubectl ]; then
+            source <(/usr/local/bin/kubectl completion bash)
+          fi
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Ensure code completion for 'k' alias system-wide
+      ansible.builtin.copy:
+        dest: /etc/profile.d/kubectl_k_completion.sh
+        content: |
+          complete -F __start_kubectl k
+        owner: root
+        group: root
+        mode: "0755"
 
 # /etc/profile.d/*.sh is only read by login shells. Interactive non-login shells
 # (e.g. `sudo bash`) read /etc/bash.bashrc, so source the profile.d snippets there
@@ -129,6 +142,47 @@
         done
         unset _pd
       fi
+
+# -----------------------------------------
+# Longhorn node prerequisites (all nodes)
+# -----------------------------------------
+# Longhorn attaches volumes via iSCSI on every node and uses NFS for RWX volumes,
+# so open-iscsi (+ running iscsid) and nfs-common must be present cluster-wide —
+# agents included. Only installed when Longhorn is enabled.
+- name: Install Longhorn node prerequisites
+  become: true
+  when: longhorn_enabled | bool
+  block:
+    - name: Ensure open-iscsi and nfs-common are installed
+      ansible.builtin.apt:
+        name:
+          - open-iscsi
+          - nfs-common
+        state: present
+        update_cache: true
+        cache_valid_time: 86400
+
+    - name: Persist iscsi_tcp kernel module load
+      ansible.builtin.copy:
+        dest: /etc/modules-load.d/longhorn.conf
+        content: |
+          iscsi_tcp
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Ensure iscsi_tcp kernel module is loaded
+      ansible.builtin.command:
+        cmd: modprobe iscsi_tcp
+      register: _iscsi_tcp_modprobe
+      changed_when: false
+      failed_when: _iscsi_tcp_modprobe.rc != 0
+
+    - name: Ensure iscsid service is enabled and running
+      ansible.builtin.systemd:
+        name: iscsid
+        enabled: true
+        state: started
 
 # -----------------------------------------
 # Kernel tuning for k3s

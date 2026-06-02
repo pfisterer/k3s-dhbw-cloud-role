@@ -22,8 +22,8 @@ provider:
 policy: sync
 
 registry: txt
-txtOwnerId: dynamic-zones-dns
-txtPrefix: dynamic-zones-dns-
+txtOwnerId: "{{ external_dns_txt_owner_id }}"
+txtPrefix: "{{ external_dns_txt_prefix }}"
 
 # ------------------------------------------------------------------------------
 # CLI arguments corresponding to your deployment spec
@@ -38,11 +38,11 @@ extraArgs:
 {% for net in external_dns_exclude_target_nets %}
   - --exclude-target-net={{ net }}
 {% endfor %}
-  - --rfc2136-host={{ rfc_2136_dns_host }}
-  - --rfc2136-port={{ rfc_2136_dns_port }}
+  - --rfc2136-host={{ rfc2136_dns_host }}
+  - --rfc2136-port={{ rfc2136_dns_port }}
   - --rfc2136-zone={{ rfc2136_zone }}
   - --rfc2136-tsig-secret={{ rfc2136_tsig_secret_value }}
-  - --rfc2136-tsig-secret-alg={{ rfc2136_dns_tsig_secret_alg }}
+  - --rfc2136-tsig-secret-alg={{ rfc2136_tsig_secret_alg }}
   - --rfc2136-tsig-keyname={{ rfc2136_tsig_secret_keyname }}
   - --rfc2136-tsig-axfr
 

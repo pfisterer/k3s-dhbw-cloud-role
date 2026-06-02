@@ -46,7 +46,7 @@ k3s_server_host: ""
 ## 🚀 K3s Server Configuration
 # -----------------------------------------------------------------------------
 # K3s installation arguments passed to the install script (via INSTALL_K3S_EXEC).
-# By default these are computed dynamically in tasks/00_network.yml from the
+# By default these are computed dynamically in tasks/03_network.yml from the
 # selected ip_family/ip_family_primary: --flannel-ipv6-masq when IPv6 is in use,
 # Traefik disabled when NGINX is enabled, and --tls-san, --cluster-cidr,
 # --service-cidr, --node-ip and --node-external-ip as needed.
@@ -67,10 +67,51 @@ kubeconfig_root: /etc/rancher/k3s/k3s.yaml
 kubeconfig_path: ""
 
 # -----------------------------------------------------------------------------
+## 🧰 Bootstrap: client / developer tooling
+# -----------------------------------------------------------------------------
+# Install Helm, kubectl, Skaffold and the shell aliases/completions. These are
+# only useful on the server node (agents have no kubeconfig), so they are
+# installed there only. Set to false to skip them entirely (lean production node).
+bootstrap_install_client_tools: true
+
+# Versions for the tools fetched during bootstrap. Leave Helm/kubectl empty to
+# track the latest stable release; pin to a tag (e.g. "v3.16.3" / "v1.31.4") for
+# reproducible installs. Skaffold takes "latest" or a release tag (e.g. "v2.13.2").
+helm_version: ""
+kubectl_version: ""
+skaffold_version: "latest"
+
+# -----------------------------------------------------------------------------
 ## 🔌 Add-on: NGINX Ingress Controller
 # -----------------------------------------------------------------------------
 # Set to false to skip installing the NGINX Ingress Controller.
 ingress_nginx_enabled: true
+
+# -----------------------------------------------------------------------------
+## 💾 Add-on: Longhorn (distributed block storage)
+# -----------------------------------------------------------------------------
+# Set to true to install Longhorn for replicated, node-independent volumes
+# (recommended for multi-node clusters — the k3s default local-path is node-local
+# and offers no failover). Longhorn attaches volumes via iSCSI on EVERY node and
+# uses NFS for RWX volumes, so open-iscsi + nfs-common are installed automatically
+# on all nodes during bootstrap when this is enabled.
+longhorn_enabled: false
+longhorn_namespace: longhorn-system
+
+# Longhorn Helm chart version. Empty = latest from the chart repository; pin a tag
+# (e.g. "1.7.2") for reproducible installs.
+longhorn_version: ""
+
+# Default number of replicas per volume. Must be <= the number of nodes, otherwise
+# replicas stay unscheduled and volumes are "Degraded" (the role asserts this).
+# Default 1 works on any cluster size and is fine for teaching/labs; raise it to 3
+# (with >= 3 nodes) for production-grade redundancy against node failure.
+longhorn_replica_count: 1
+
+# Make Longhorn the cluster's default StorageClass and unset local-path's default
+# (so exactly one default exists). When false, local-path stays the default and you
+# opt into Longhorn per-PVC via storageClassName: longhorn.
+longhorn_default_storage_class: true
 
 # -----------------------------------------------------------------------------
 ## 📦 Helm Repository Management
@@ -106,13 +147,18 @@ cert_manager_namespace: cert-manager
 
 # Set to http01 or dns01 (e.g., for wildcard certificates). dns01 requires the
 # RFC2136 vars below (rfc2136_zone / rfc2136_tsig_secret_value /
-# rfc2136_dns_tsig_secret_alg / rfc2136_tsig_secret_keyname); if they are unset
+# rfc2136_tsig_secret_alg / rfc2136_tsig_secret_keyname); if they are unset
 # the ClusterIssuer silently falls back to http01.
 cert_manager_preferred_challenge: http01
 
 # Name of the k8s Secret (in cert_manager_namespace) the role creates to hold the
 # RFC2136 TSIG key for the dns01 solver. Only created when dns01 is selected.
 cert_manager_rfc2136_tsig_secret_name: "cert-manager-rfc2136-tsig"
+
+# Name of the cert-manager ClusterIssuer this role creates. Reference it from your
+# Ingress/IngressRoute (e.g. the cert-manager.io/cluster-issuer annotation) to
+# request certificates from it.
+cert_manager_cluster_issuer_name: certificate-cluster-issuer
 
 # -----------------------------------------------------------------------------
 ## 🌐 Add-on: External DNS
@@ -121,10 +167,17 @@ cert_manager_rfc2136_tsig_secret_name: "cert-manager-rfc2136-tsig"
 external_dns_namespace: external-dns
 external_dns_version: "v0.19.0"
 external_dns_log_level: "debug"
-external_dns_cluster_issuer_name: certificate-cluster-issuer
 
-rfc_2136_dns_host: "141.72.5.244"
-rfc_2136_dns_port: 53
+# Registry (TXT record) ownership. external-dns uses TXT records to track the
+# records it manages. Make the owner ID unique per cluster when several clusters
+# publish into the same zone, otherwise they fight over each other's records.
+external_dns_txt_owner_id: dynamic-zones-dns
+external_dns_txt_prefix: dynamic-zones-dns-
+
+# RFC2136 DNS server address. Required when rfc2136_zone is set (also used as the
+# nameserver for the cert-manager dns01 solver). Leave empty otherwise.
+rfc2136_dns_host: ""
+rfc2136_dns_port: 53
 
 # Target networks external-dns must never publish to public DNS. Ingress/Service
 # status often lists every node address, including private/NAT ranges (e.g. the
@@ -140,5 +193,5 @@ external_dns_exclude_target_nets:
   - fe80::/10 # IPv6 link-local
 # rfc2136_zone: your-zone.example.com
 # rfc2136_tsig_secret_value: some_value
-# rfc2136_dns_tsig_secret_alg: hmac-sha512
-# rfc2136_tsig_secret_keyname: user-key-9a0b9a1b08cf7044c124d38b77d34354545
+# rfc2136_tsig_secret_alg: hmac-sha512
+# rfc2136_tsig_secret_keyname: user-key-xxxx
