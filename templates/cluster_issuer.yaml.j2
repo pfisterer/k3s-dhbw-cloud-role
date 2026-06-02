@@ -34,11 +34,11 @@ spec:
 {% if rfc2136_vars_set and cert_manager_preferred_challenge == 'dns01' %}
             - dns01:
                 rfc2136:
-                    nameserver: "{{ rfc_2136_dns_host }}"
+                    nameserver: "{{ ('[' + rfc_2136_dns_host + ']') if ':' in rfc_2136_dns_host else rfc_2136_dns_host }}:{{ rfc_2136_dns_port }}"
                     tsigKeyName: "{{ rfc2136_tsig_secret_keyname }}"
                     tsigAlgorithm: "{{ rfc2136_dns_tsig_secret_alg | replace('-', '') | upper }}"
                     tsigSecretSecretRef:
-                        name: "{{ cert_manager_eab_secret_name }}" # the name of the k8s secret holding the TSIG key.. not the key itself!
+                        name: "{{ cert_manager_rfc2136_tsig_secret_name }}" # k8s Secret with the TSIG key, created in 06_addons_cert_manager.yml
                         key: secret
 {% else %}
             - http01:

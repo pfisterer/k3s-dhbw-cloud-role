@@ -23,6 +23,8 @@
       controller:
         service:
           type: LoadBalancer
+          ipFamilyPolicy: "{{ 'PreferDualStack' if ip_family == 'dual' else 'SingleStack' }}"
+          ipFamilies: "{{ _ip_families_ordered | map('extract', {'ipv4': 'IPv4', 'ipv6': 'IPv6'}) | list }}"
         watchIngressWithoutClass: true
         config:
           strict-validate-path-type: false

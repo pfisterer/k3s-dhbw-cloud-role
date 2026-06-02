@@ -1,0 +1,82 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Central IPv4 / IPv6 / dual-stack network resolution.
+# Runs for both server and agent nodes and computes all family-dependent facts
+# (ordered families, node IPs, CIDRs, TLS SANs, external IP and k3s exec args).
+# ─────────────────────────────────────────────────────────────────────────────
+
+- name: Determine ordered IP families and base addresses
+  ansible.builtin.set_fact:
+    # First entry = primary family (k3s uses it as the cluster's primary stack).
+    _ip_families_ordered: >-
+      {{ ['ipv4'] if ip_family == 'ipv4'
+         else (['ipv6'] if ip_family == 'ipv6'
+         else (['ipv4', 'ipv6'] if ip_family_primary == 'ipv4'
+         else ['ipv6', 'ipv4'])) }}
+    _node_ipv4: "{{ ansible_facts.default_ipv4.address | default('') }}"
+    _node_ipv6: "{{ ansible_facts.default_ipv6.address | default('') }}"
+    # Address Ansible connects through — the externally reachable one.
+    _reachable_host: "{{ ansible_host | default(inventory_hostname) }}"
+
+- name: Validate IP family configuration
+  ansible.builtin.assert:
+    that:
+      - ip_family in ['ipv4', 'ipv6', 'dual']
+      - "ip_family != 'dual' or ip_family_primary in ['ipv4', 'ipv6']"
+      - "'ipv4' not in _ip_families_ordered or _node_ipv4 | length > 0"
+      - "'ipv6' not in _ip_families_ordered or _node_ipv6 | length > 0"
+    fail_msg: >-
+      Invalid IP configuration on {{ inventory_hostname }}
+      (ip_family={{ ip_family }}, ip_family_primary={{ ip_family_primary }}).
+      A required interface address fact is missing
+      (default_ipv4='{{ _node_ipv4 }}', default_ipv6='{{ _node_ipv6 }}').
+      These facts come from the *default route* of each family, so dual-stack
+      needs BOTH families to have one. If connectivity for a family works
+      (e.g. ping -4) but its fact is empty, the interface likely has only a
+      subnet route and no default route (common with NAT): add a default route
+      on that interface, or set k3s_node_external_ip explicitly.
+    success_msg: >-
+      {{ inventory_hostname }}: IP family configuration OK
+      (ip_family={{ ip_family }}, default_ipv4='{{ _node_ipv4 }}',
+      default_ipv6='{{ _node_ipv6 }}').
+
+- name: Compute derived network settings
+  ansible.builtin.set_fact:
+    _node_ip_list: "{{ _ip_families_ordered | map('extract', {'ipv4': _node_ipv4, 'ipv6': _node_ipv6}) | reject('equalto', '') | list }}"
+    _cluster_cidr_list: "{{ _ip_families_ordered | map('extract', {'ipv4': k3s_cluster_cidr_ipv4, 'ipv6': k3s_cluster_cidr_ipv6}) | list }}"
+    _service_cidr_list: "{{ _ip_families_ordered | map('extract', {'ipv4': k3s_service_cidr_ipv4, 'ipv6': k3s_service_cidr_ipv6}) | list }}"
+    _ipv6_involved: "{{ 'ipv6' in _ip_families_ordered }}"
+    # kubeconfig points at the reachable address; bracket IPv6 literals.
+    _kubeconfig_url: "https://{{ ('[' + _reachable_host + ']') if ':' in _reachable_host else _reachable_host }}:6443"
+
+- name: Compute TLS SANs and external node IP
+  ansible.builtin.set_fact:
+    # SAN list = internal node IP(s) plus the externally reachable address.
+    _tls_sans: "{{ (_node_ip_list + [_reachable_host]) | reject('equalto', '') | unique | list }}"
+    # Auto external IP: the reachable address when it differs from the internal one.
+    _node_external_ip: >-
+      {{ k3s_node_external_ip if (k3s_node_external_ip | length > 0)
+         else (_reachable_host if _reachable_host not in _node_ip_list else '') }}
+    # Agents set only --node-ip explicitly (per-family); flannel, kube-proxy and the
+    # network-policy controller are all k3s defaults and need no extra flags.
+    _k3s_agent_exec_args: >-
+      {{ ['--node-ip=' + (_node_ip_list | join(','))] | select | join(' ') }}
+
+- name: Build k3s server exec args
+  ansible.builtin.set_fact:
+    # k3s runs with its built-in flannel CNI (+ kube-proxy + network-policy), so the
+    # only CNI flag added is --flannel-ipv6-masq, and only when IPv6 is involved, so
+    # ULA (fd00::/8) pods can still egress. Cluster/service CIDRs and --node-ip are
+    # always set explicitly so k3s allocates the per-family podCIDRs — for single
+    # -stack IPv4 these equal the k3s defaults.
+    _k3s_exec_args: >-
+      {{ [
+           ('--flannel-ipv6-masq' if _ipv6_involved else ''),
+           ('--disable=traefik' if ingress_nginx_enabled | bool else ''),
+           ('--tls-san=' + (_tls_sans | join(' --tls-san='))) if (_tls_sans | length > 0) else '',
+           '--cluster-cidr=' + (_cluster_cidr_list | join(',')),
+           '--service-cidr=' + (_service_cidr_list | join(',')),
+           '--node-ip=' + (_node_ip_list | join(',')),
+           ('--node-external-ip=' + _node_external_ip) if (_node_external_ip | length > 0) else '',
+           (k3s_extra_exec_args if (k3s_extra_exec_args | length > 0) else '')
+         ] | select | join(' ') }}

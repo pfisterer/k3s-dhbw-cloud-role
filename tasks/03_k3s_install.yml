@@ -4,22 +4,13 @@
   when: k3s_role == 'server'
   become: true
   vars:
-    k3s_node_ip: >-
-      {% if ip_family == 'ipv4' %}
-      {{ ansible_facts['default_ipv4']['address'] }}
-      {% elif ip_family == 'ipv6' %}
-      {{ ansible_facts['default_ipv6']['address'] }}
-      {% endif %}
-    kubeconfig_url: >-
-      {% if ip_family == 'ipv4' %}
-      https://{{ ansible_facts['default_ipv4']['address'] }}:6443
-      {% elif ip_family == 'ipv6' %}
-      https://[{{ ansible_facts['default_ipv6']['address'] }}]:6443
-      {% endif %}
+    # Use the explicit override when set, otherwise the args computed in 00_network.yml.
+    _k3s_server_exec_args: "{{ k3s_exec_args if (k3s_exec_args | length > 0) else _k3s_exec_args }}"
+    kubeconfig_url: "{{ _kubeconfig_url }}"
   block:
     - name: Install K3s server
       ansible.builtin.shell:
-        cmd: "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='{{ k3s_exec_args }}' sh -"
+        cmd: "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='{{ _k3s_server_exec_args }}' sh -"
         creates: /usr/local/bin/k3s
       tags:
         - skip_ansible_lint
@@ -30,25 +21,37 @@
         timeout: 180
 
     - name: Replace localhost with actual node IP in kubeconfig
+      # k3s writes the IPv4 loopback (127.0.0.1) or the IPv6 loopback ([::1])
+      # depending on the stack, so match both.
       ansible.builtin.replace:
         path: "{{ kubeconfig_root }}"
-        regexp: '^(\s*server:\s+)https://127\.0\.0\.1:6443'
+        regexp: '^(\s*server:\s+)https://(127\.0\.0\.1|\[::1\]):6443'
         replace: '\1{{ kubeconfig_url }}'
 
     - name: Copy kubeconfig to localhost
       ansible.builtin.fetch:
         src: "{{ kubeconfig_root }}"
-        dest: "./kubeconfig-{{ inventory_hostname }}.yaml"
+        # kubeconfig_path overrides the default name when set. Sanitize ':' so IPv6
+        # inventory host names still yield filesystem-friendly default paths.
+        # fetch overwrites the local file whenever the remote content differs.
+        dest: "{{ kubeconfig_path if (kubeconfig_path | length > 0) else './kubeconfig-' + (inventory_hostname | replace(':', '_')) + '.yaml' }}"
         flat: true
 
-    - name: Wait for node to be ready
-      ansible.builtin.shell: /usr/local/bin/kubectl get nodes
+    # Readiness gate before the add-ons (which need a working pod network):
+    # k3s' built-in flannel brings the node Ready on its own, so wait for it here.
+    - name: Wait for the server node to become Ready
+      ansible.builtin.shell: |
+        set -o pipefail
+        /usr/local/bin/kubectl get nodes --no-headers \
+          | awk '$2 == "Ready" { ready++ } END { exit (ready > 0) ? 0 : 1 }'
+      args:
+        executable: /bin/bash
       environment:
         KUBECONFIG: "{{ kubeconfig_root }}"
-      register: kubectl_check
-      until: kubectl_check.rc == 0 and 'Ready' in kubectl_check.stdout
-      retries: 24
-      delay: 5
+      register: _flannel_node_ready
+      until: _flannel_node_ready.rc == 0
+      retries: 30
+      delay: 10
       changed_when: false
       tags:
         - skip_ansible_lint
@@ -82,10 +85,11 @@
 
     - name: Install K3s agent and join cluster
       ansible.builtin.shell:
-        cmd: "curl -sfL https://get.k3s.io | sh -s - agent"
+        cmd: "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='{{ _k3s_agent_exec_args }}' sh -s - agent"
         creates: /usr/local/bin/k3s
       environment:
-        K3S_URL: "https://{{ k3s_server_host }}:6443"
+        # Bracket IPv6 server addresses for the join URL.
+        K3S_URL: "https://{{ ('[' + k3s_server_host + ']') if ':' in k3s_server_host else k3s_server_host }}:6443"
         K3S_TOKEN: "{{ k3s_token_slurp['content'] | b64decode | trim }}"
       tags:
         - skip_ansible_lint

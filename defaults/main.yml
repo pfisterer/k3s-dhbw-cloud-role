@@ -1,9 +1,33 @@
 # -----------------------------------------------------------------------------
 ## 🌟 General & Network Settings
 # -----------------------------------------------------------------------------
-# The IP family type (ipv4 or ipv6). Determines which interface address is used for generating TLS certificates
-# and setting the kubeconfig server URL.
+# The IP stack to configure the cluster for:
+#   ipv4 → IPv4 single-stack (default, unchanged behaviour)
+#   ipv6 → IPv6 single-stack
+#   dual → dual-stack (both families)
+# Determines which addresses are used for TLS SANs, the kubeconfig URL, k3s
+# --node-ip and the pod/service CIDRs.
 ip_family: "ipv4"
+
+# Only relevant when ip_family == "dual": which family is the *primary* one.
+# The primary family is listed first in --cluster-cidr/--service-cidr/--node-ip
+# (k3s uses the first entry as the cluster's primary family).
+#   ipv4 → IPv4 primary, IPv6 secondary ("IPv6 as an add-on")
+#   ipv6 → IPv6 primary, IPv4 secondary (e.g. only private/NATed IPv4 available)
+ip_family_primary: "ipv4"
+
+# Pod (cluster) and service CIDRs per family.
+# The IPv4 values match the k3s defaults; the IPv6 values are ULA ranges.
+k3s_cluster_cidr_ipv4: "10.42.0.0/16"
+k3s_service_cidr_ipv4: "10.43.0.0/16"
+k3s_cluster_cidr_ipv6: "fd00:42::/56"
+k3s_service_cidr_ipv6: "fd00:43::/112"
+
+# Externally reachable node IP advertised to k3s (--node-external-ip).
+# Leave empty ("") to auto-detect it from the address Ansible connects through
+# (ansible_host / inventory_hostname) whenever that differs from the host's
+# internal interface address (e.g. NAT). Set explicitly only for edge cases.
+k3s_node_external_ip: ""
 
 # -----------------------------------------------------------------------------
 ## 🚀 K3s Node Role
@@ -22,13 +46,25 @@ k3s_server_host: ""
 ## 🚀 K3s Server Configuration
 # -----------------------------------------------------------------------------
 # K3s installation arguments passed to the install script (via INSTALL_K3S_EXEC).
-# Traefik is disabled by default to allow for a dedicated Ingress controller (e.g., NGINX).
-# The --tls-san value is dynamically calculated in the tasks to match the node's
-# external IP, ensuring external kubeconfig access works without TLS errors.
-k3s_exec_args: "{{ '--disable=traefik ' if ingress_nginx_enabled else '' }}--tls-san={{ k3s_node_ip }}"
+# By default these are computed dynamically in tasks/00_network.yml from the
+# selected ip_family/ip_family_primary: --flannel-ipv6-masq when IPv6 is in use,
+# Traefik disabled when NGINX is enabled, and --tls-san, --cluster-cidr,
+# --service-cidr, --node-ip and --node-external-ip as needed.
+# Set this to a non-empty string only to fully override the computed arguments.
+k3s_exec_args: ""
+
+# Extra arguments appended verbatim to the computed k3s server install arguments.
+k3s_extra_exec_args: ""
 
 # Standard path where K3s stores the main kubeconfig file on the node.
 kubeconfig_root: /etc/rancher/k3s/k3s.yaml
+
+# Destination on the Ansible control node where the server's kubeconfig is
+# fetched (full path + filename). Empty = the default per-host name
+# "./kubeconfig-<inventory_host>.yaml" (':' in IPv6 hosts sanitized to '_').
+# Set to a fixed path to always write the same file — it is overwritten on every
+# run. Relative paths are resolved from the playbook directory.
+kubeconfig_path: ""
 
 # -----------------------------------------------------------------------------
 ## 🔌 Add-on: NGINX Ingress Controller
@@ -68,8 +104,15 @@ cert_manager_eab_secret_name: "cert-manager-eab-secret"
 # Namespace in which cert-manager will be deployed
 cert_manager_namespace: cert-manager
 
-# Set to http01 or dns01 (e.g., for wildcard certificates)
+# Set to http01 or dns01 (e.g., for wildcard certificates). dns01 requires the
+# RFC2136 vars below (rfc2136_zone / rfc2136_tsig_secret_value /
+# rfc2136_dns_tsig_secret_alg / rfc2136_tsig_secret_keyname); if they are unset
+# the ClusterIssuer silently falls back to http01.
 cert_manager_preferred_challenge: http01
+
+# Name of the k8s Secret (in cert_manager_namespace) the role creates to hold the
+# RFC2136 TSIG key for the dns01 solver. Only created when dns01 is selected.
+cert_manager_rfc2136_tsig_secret_name: "cert-manager-rfc2136-tsig"
 
 # -----------------------------------------------------------------------------
 ## 🌐 Add-on: External DNS
@@ -82,7 +125,20 @@ external_dns_cluster_issuer_name: certificate-cluster-issuer
 
 rfc_2136_dns_host: "141.72.5.244"
 rfc_2136_dns_port: 53
-#rfc2136_zone: your-zone.example.com
-#rfc2136_tsig_secret_value: some_value
-#rfc2136_dns_tsig_secret_alg: hmac-sha512
-#rfc2136_tsig_secret_keyname: user-key-9a0b9a1b08cf7044c124d38b77d34354545
+
+# Target networks external-dns must never publish to public DNS. Ingress/Service
+# status often lists every node address, including private/NAT ranges (e.g. the
+# IPv4 NAT addresses on a dual-stack cluster). These are excluded so only the
+# publicly routable targets (e.g. the global IPv6 addresses) become DNS records.
+external_dns_exclude_target_nets:
+  - 10.0.0.0/8 # RFC1918
+  - 172.16.0.0/12 # RFC1918
+  - 192.168.0.0/16 # RFC1918
+  - 100.64.0.0/10 # CGNAT (RFC6598)
+  - 169.254.0.0/16 # IPv4 link-local
+  - fc00::/7 # IPv6 ULA
+  - fe80::/10 # IPv6 link-local
+# rfc2136_zone: your-zone.example.com
+# rfc2136_tsig_secret_value: some_value
+# rfc2136_dns_tsig_secret_alg: hmac-sha512
+# rfc2136_tsig_secret_keyname: user-key-9a0b9a1b08cf7044c124d38b77d34354545

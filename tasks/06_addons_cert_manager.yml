@@ -44,6 +44,27 @@
           data:
             secret: "{{ cert_manager_eab_secret | b64encode }}"
 
+    # --- TSIG secret for the DNS-01 (RFC2136) solver. data.secret holds the TSIG
+    # key base64-encoded (k8s stores it verbatim; cert-manager base64-decodes it
+    # back to the same value external-dns gets). Using `data` (not `stringData`)
+    # keeps the task idempotent. Created only for dns01 — http01 needs no creds.
+    - name: Create RFC2136 TSIG secret for the cert-manager DNS-01 solver
+      when:
+        - cert_manager_preferred_challenge == 'dns01'
+        - rfc2136_tsig_secret_value | default('') | length > 0
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_root }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ cert_manager_rfc2136_tsig_secret_name }}"
+            namespace: "{{ cert_manager_namespace }}"
+          type: Opaque
+          data:
+            secret: "{{ rfc2136_tsig_secret_value | b64encode }}"
+
     # --- ClusterIssuer
     - name: Render ClusterIssuer template
       ansible.builtin.template:

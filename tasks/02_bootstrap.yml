@@ -110,9 +110,50 @@
     group: root
     mode: "0755"
 
+# /etc/profile.d/*.sh is only read by login shells. Interactive non-login shells
+# (e.g. `sudo bash`) read /etc/bash.bashrc, so source the profile.d snippets there
+# too — this makes the k/l aliases, KUBECONFIG and completions available as well.
+- name: Load /etc/profile.d snippets in interactive non-login bash shells
+  become: true
+  ansible.builtin.blockinfile:
+    path: /etc/bash.bashrc
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+    marker: "# {mark} ANSIBLE MANAGED: source /etc/profile.d for non-login shells"
+    block: |
+      if [ -d /etc/profile.d ]; then
+        for _pd in /etc/profile.d/*.sh; do
+          [ -r "$_pd" ] && . "$_pd"
+        done
+        unset _pd
+      fi
+
 # -----------------------------------------
 # Kernel tuning for k3s
 # -----------------------------------------
+# The net.netfilter.nf_conntrack_* sysctls only exist once the nf_conntrack
+# kernel module is loaded; load and persist it first so the sysctl reload below
+# does not fail with "cannot stat /proc/sys/net/netfilter/nf_conntrack_max".
+- name: Persist nf_conntrack kernel module load
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/k3s.conf
+    content: |
+      nf_conntrack
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Ensure nf_conntrack kernel module is loaded
+  become: true
+  ansible.builtin.command:
+    cmd: modprobe nf_conntrack
+  register: _nf_conntrack_modprobe
+  changed_when: false
+  failed_when: _nf_conntrack_modprobe.rc != 0
+
 - name: Tune kernel parameters for k3s
   become: true
   ansible.posix.sysctl:
@@ -137,6 +178,10 @@
     - name: vm.swappiness
       value: "0"
     - name: net.ipv4.ip_forward
+      value: "1"
+    - name: net.ipv6.conf.all.forwarding
+      value: "1"
+    - name: net.ipv6.conf.default.forwarding
       value: "1"
     - name: net.ipv4.ip_local_port_range
       value: "1024 65535"

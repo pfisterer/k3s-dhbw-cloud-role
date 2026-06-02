@@ -1,25 +1,36 @@
 ---
-- ansible.builtin.include_tasks: 01_preflight.yml
+- name: Include preflight tasks
+  ansible.builtin.include_tasks: 01_preflight.yml
   tags: [preflight, python]
 
-- ansible.builtin.include_tasks: 02_bootstrap.yml
+- name: Include bootstrap tasks
+  ansible.builtin.include_tasks: 02_bootstrap.yml
   tags: [bootstrap]
 
-- ansible.builtin.include_tasks: 03_k3s_install.yml
+- name: Include network tasks
+  ansible.builtin.include_tasks: 00_network.yml
+  tags: [k3s, network]
+
+- name: Include k3s install tasks
+  ansible.builtin.include_tasks: 03_k3s_install.yml
   tags: [k3s]
 
-- ansible.builtin.include_tasks: 04_addons_helm.yml
+- name: Include helm addons tasks
+  ansible.builtin.include_tasks: 04_addons_helm.yml
   tags: [helm]
   when: k3s_role == 'server'
 
-- ansible.builtin.include_tasks: 05_addons_ingress_nginx.yml
+- name: Include ingress nginx addons tasks
+  ansible.builtin.include_tasks: 05_addons_ingress_nginx.yml
   tags: [ingress]
   when: k3s_role == 'server' and ingress_nginx_enabled | bool
 
-- ansible.builtin.include_tasks: 06_addons_cert_manager.yml
+- name: Include cert manager addons tasks
+  ansible.builtin.include_tasks: 06_addons_cert_manager.yml
   tags: [certmanager]
   when: k3s_role == 'server'
 
-- ansible.builtin.include_tasks: 07_addons_external_dns.yml
+- name: Include external DNS addons tasks
+  ansible.builtin.include_tasks: 07_addons_external_dns.yml
   tags: [externaldns]
   when: k3s_role == 'server'
