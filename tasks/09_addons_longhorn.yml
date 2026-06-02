@@ -56,6 +56,7 @@
             defaultReplicaCount: "{{ longhorn_replica_count | int }}"
         wait: true
         # Longhorn pulls several images and rolls out CRDs + DaemonSets, so give it
-        # more time than the module default before atomic would roll the release back.
+        # more time than the module default. Deliberately NOT atomic: a failed
+        # Longhorn install/rollback can hang on its CRD finalizers and need manual
+        # cleanup; `state: present` (helm upgrade -i) reconverges on the next run.
         wait_timeout: "10m0s"
-        atomic: true
