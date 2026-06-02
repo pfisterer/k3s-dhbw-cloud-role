@@ -59,27 +59,3 @@
         # more time than the module default before atomic would roll the release back.
         wait_timeout: "10m0s"
         atomic: true
-
-    # When Longhorn should be the default StorageClass, drop the default flag from
-    # the k3s-shipped local-path SC so the cluster has exactly one default.
-    - name: Check for the local-path StorageClass
-      kubernetes.core.k8s_info:
-        kind: StorageClass
-        name: local-path
-        kubeconfig: "{{ kubeconfig_root }}"
-      register: _local_path_sc
-      when: longhorn_default_storage_class | bool
-
-    - name: Unset local-path as the default StorageClass
-      kubernetes.core.k8s:
-        state: patched
-        kind: StorageClass
-        name: local-path
-        kubeconfig: "{{ kubeconfig_root }}"
-        definition:
-          metadata:
-            annotations:
-              storageclass.kubernetes.io/is-default-class: "false"
-      when:
-        - longhorn_default_storage_class | bool
-        - _local_path_sc.resources | default([]) | length > 0

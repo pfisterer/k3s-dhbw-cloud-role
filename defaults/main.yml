@@ -108,9 +108,10 @@ longhorn_version: ""
 # (with >= 3 nodes) for production-grade redundancy against node failure.
 longhorn_replica_count: 1
 
-# Make Longhorn the cluster's default StorageClass and unset local-path's default
-# (so exactly one default exists). When false, local-path stays the default and you
-# opt into Longhorn per-PVC via storageClassName: longhorn.
+# Make Longhorn the cluster's default StorageClass. When true, k3s' built-in
+# local-path storage is disabled (via --disable=local-storage on the server) so
+# Longhorn is the sole, unambiguous default. When false, local-path stays the
+# default and you opt into Longhorn per-PVC via storageClassName: longhorn.
 longhorn_default_storage_class: true
 
 # -----------------------------------------------------------------------------

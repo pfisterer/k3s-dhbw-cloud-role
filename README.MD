@@ -201,10 +201,10 @@ longhorn_enabled: true
 # longhorn_replica_count defaults to 1 (works on any cluster size, fine for labs);
 # raise to 3 on a >= 3-node cluster for production redundancy.
 longhorn_replica_count: 1
-longhorn_default_storage_class: true   # makes Longhorn the default, unsets local-path's default
+longhorn_default_storage_class: true   # makes Longhorn the default; disables k3s' local-path so it's the only default
 ```
 
-When enabled, the role installs the iSCSI/NFS node prerequisites (`open-iscsi`, `nfs-common`, `iscsid`) on **every** node automatically. Longhorn provides a `longhorn` StorageClass; with `longhorn_default_storage_class: true` it also removes the default flag from `local-path` so exactly one default StorageClass remains.
+When enabled, the role installs the iSCSI/NFS node prerequisites (`open-iscsi`, `nfs-common`, `iscsid`) on **every** node automatically. Longhorn provides a `longhorn` StorageClass; with `longhorn_default_storage_class: true` the role disables k3s' built-in `local-path` storage (`--disable=local-storage`), leaving Longhorn as the sole, unambiguous default StorageClass. (k3s' deploy controller owns the `local-path` SC and would otherwise reconcile its default-class flag back on every restart, so disabling it at the source is the only durable way to avoid two default StorageClasses.)
 
 > Note: the k3s server still stores cluster state in a single-node datastore (`/var/lib/rancher/k3s/server`). Longhorn replicates **application** volumes, not the control-plane state — back up the server datastore separately.
 
@@ -246,7 +246,7 @@ All variables are defined in `defaults/main.yml` and can be overridden per host 
 | `longhorn_namespace`             | `longhorn-system` | Namespace Longhorn is deployed into.                                                                                                                  |
 | `longhorn_version`               | `""`              | Longhorn Helm chart version. Empty = latest; pin a tag (e.g. `1.7.2`) for reproducible installs.                                                      |
 | `longhorn_replica_count`         | `1`               | Default replicas per volume. Must be `<=` the number of nodes (asserted). `1` suits teaching/labs; raise to `3` (≥3 nodes) for production redundancy. |
-| `longhorn_default_storage_class` | `true`            | Make Longhorn the default StorageClass and unset `local-path`'s default flag (so exactly one default exists).                                         |
+| `longhorn_default_storage_class` | `true`            | Make Longhorn the default StorageClass. When `true`, k3s' built-in `local-path` storage is disabled (`--disable=local-storage`) so Longhorn is the only default.                                         |
 
 ### Bootstrap / client tooling
 
