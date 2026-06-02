@@ -174,9 +174,10 @@ external_dns_log_level: "debug"
 external_dns_txt_owner_id: dynamic-zones-dns
 external_dns_txt_prefix: dynamic-zones-dns-
 
-# RFC2136 DNS server address. Required when rfc2136_zone is set (also used as the
-# nameserver for the cert-manager dns01 solver). Leave empty otherwise.
-rfc2136_dns_host: ""
+# RFC2136 DNS server address (also the nameserver for the cert-manager dns01 solver),
+# used when rfc2136_zone is set. Defaults to the DHBW dynamic-DNS server; override for
+# other environments (set to "" to disable when no RFC2136 zone is configured).
+rfc2136_dns_host: "141.72.5.244"
 rfc2136_dns_port: 53
 
 # Target networks external-dns must never publish to public DNS. Ingress/Service

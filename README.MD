@@ -20,8 +20,6 @@ Add the role to your requirements file (`requirements.yml`):
 ---
 - name: k3s-dhbw-cloud-role
   src: https://github.com/pfisterer/k3s-dhbw-cloud-role.git
-  # version: main
-  # version: v1.0.0
 ```
 
 Then install it:
@@ -242,56 +240,56 @@ All variables are defined in `defaults/main.yml` and can be overridden per host 
 
 ### Storage (Longhorn)
 
-| Variable                         | Default           | Description                                                                                                   |
-| -------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------ |
-| `longhorn_enabled`               | `false`           | Install Longhorn for replicated, node-independent volumes. Installs the iSCSI/NFS prerequisites on all nodes. |
-| `longhorn_namespace`             | `longhorn-system` | Namespace Longhorn is deployed into.                                                                          |
-| `longhorn_version`               | `""`              | Longhorn Helm chart version. Empty = latest; pin a tag (e.g. `1.7.2`) for reproducible installs.             |
+| Variable                         | Default           | Description                                                                                                                                           |
+| -------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `longhorn_enabled`               | `false`           | Install Longhorn for replicated, node-independent volumes. Installs the iSCSI/NFS prerequisites on all nodes.                                         |
+| `longhorn_namespace`             | `longhorn-system` | Namespace Longhorn is deployed into.                                                                                                                  |
+| `longhorn_version`               | `""`              | Longhorn Helm chart version. Empty = latest; pin a tag (e.g. `1.7.2`) for reproducible installs.                                                      |
 | `longhorn_replica_count`         | `1`               | Default replicas per volume. Must be `<=` the number of nodes (asserted). `1` suits teaching/labs; raise to `3` (≥3 nodes) for production redundancy. |
-| `longhorn_default_storage_class` | `true`            | Make Longhorn the default StorageClass and unset `local-path`'s default flag (so exactly one default exists). |
+| `longhorn_default_storage_class` | `true`            | Make Longhorn the default StorageClass and unset `local-path`'s default flag (so exactly one default exists).                                         |
 
 ### Bootstrap / client tooling
 
 These tools (Helm, kubectl, Skaffold, shell aliases and completions) are installed on the **server node only** — agents have no kubeconfig, so they would be unusable there.
 
-| Variable                        | Default    | Description                                                                                                                          |
-| ------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `bootstrap_install_client_tools` | `true`     | Install Helm, kubectl, Skaffold and the shell aliases/completions on the server. Set to `false` for a lean node.                    |
-| `helm_version`                  | `""`       | Helm version to install. Empty = latest stable; pin a tag (e.g. `v3.16.3`) for reproducible installs.                              |
-| `kubectl_version`               | `""`       | kubectl version to install. Empty = latest stable (`stable.txt`); pin a tag (e.g. `v1.31.4`).                                       |
-| `skaffold_version`              | `latest`   | Skaffold release to install (`latest` or a tag such as `v2.13.2`).                                                                  |
+| Variable                         | Default  | Description                                                                                                      |
+| -------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
+| `bootstrap_install_client_tools` | `true`   | Install Helm, kubectl, Skaffold and the shell aliases/completions on the server. Set to `false` for a lean node. |
+| `helm_version`                   | `""`     | Helm version to install. Empty = latest stable; pin a tag (e.g. `v3.16.3`) for reproducible installs.            |
+| `kubectl_version`                | `""`     | kubectl version to install. Empty = latest stable (`stable.txt`); pin a tag (e.g. `v1.31.4`).                    |
+| `skaffold_version`               | `latest` | Skaffold release to install (`latest` or a tag such as `v2.13.2`).                                               |
 
 ### Cert-Manager
 
-| Variable                           | Default                           | Description                                                        |
-| ---------------------------------- | --------------------------------- | ------------------------------------------------------------------ |
-| `cert_manager_email`               | `""`                              | ACME account email. Leave empty to skip cert-manager installation. |
-| `cert_manager_url`                 | `https://certificates.dhbw.cloud` | ACME server URL.                                                   |
-| `cert_manager_namespace`           | `cert-manager`                    | Deployment namespace.                                              |
-| `cert_manager_preferred_challenge` | `http01`                          | Challenge type: `http01` or `dns01`. `dns01` needs the RFC2136 vars (see ExternalDNS) and uses the role-created TSIG secret; falls back to `http01` if they are unset. |
-| `cert_manager_rfc2136_tsig_secret_name` | `cert-manager-rfc2136-tsig`  | Name of the Secret the role creates (in the cert-manager namespace) holding the RFC2136 TSIG key for the `dns01` solver.                                              |
-| `cert_manager_cluster_issuer_name` | `certificate-cluster-issuer`      | Name of the ClusterIssuer this role creates. Reference it from your Ingress/IngressRoute (e.g. the `cert-manager.io/cluster-issuer` annotation). |
-| `cert_manager_private_key_secret_name` | `cert-manager-private-key-secret` | Secret name for the ACME account private key (`privateKeySecretRef`). |
-| `cert_manager_eab_keyid`           | `""`                              | External Account Binding Key ID (optional).                        |
-| `cert_manager_eab_secret`          | `""`                              | External Account Binding MAC key (optional).                       |
-| `cert_manager_eab_secret_name`     | `cert-manager-eab-secret`         | Secret name holding the EAB MAC key (only used when EAB is set).   |
+| Variable                                | Default                           | Description                                                                                                                                                            |
+| --------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cert_manager_email`                    | `""`                              | ACME account email. Leave empty to skip cert-manager installation.                                                                                                     |
+| `cert_manager_url`                      | `https://certificates.dhbw.cloud` | ACME server URL.                                                                                                                                                       |
+| `cert_manager_namespace`                | `cert-manager`                    | Deployment namespace.                                                                                                                                                  |
+| `cert_manager_preferred_challenge`      | `http01`                          | Challenge type: `http01` or `dns01`. `dns01` needs the RFC2136 vars (see ExternalDNS) and uses the role-created TSIG secret; falls back to `http01` if they are unset. |
+| `cert_manager_rfc2136_tsig_secret_name` | `cert-manager-rfc2136-tsig`       | Name of the Secret the role creates (in the cert-manager namespace) holding the RFC2136 TSIG key for the `dns01` solver.                                               |
+| `cert_manager_cluster_issuer_name`      | `certificate-cluster-issuer`      | Name of the ClusterIssuer this role creates. Reference it from your Ingress/IngressRoute (e.g. the `cert-manager.io/cluster-issuer` annotation).                       |
+| `cert_manager_private_key_secret_name`  | `cert-manager-private-key-secret` | Secret name for the ACME account private key (`privateKeySecretRef`).                                                                                                  |
+| `cert_manager_eab_keyid`                | `""`                              | External Account Binding Key ID (optional).                                                                                                                            |
+| `cert_manager_eab_secret`               | `""`                              | External Account Binding MAC key (optional).                                                                                                                           |
+| `cert_manager_eab_secret_name`          | `cert-manager-eab-secret`         | Secret name holding the EAB MAC key (only used when EAB is set).                                                                                                       |
 
 ### ExternalDNS (RFC2136)
 
-| Variable                           | Default                      | Description                                             |
-| ---------------------------------- | ---------------------------- | ------------------------------------------------------- |
-| `rfc2136_zone`                     | _(unset)_                    | DNS zone. Leave unset to skip ExternalDNS installation. |
-| `rfc2136_dns_host`                 | `""`                         | RFC2136 DNS server IP. Required when `rfc2136_zone` is set (also used as the cert-manager `dns01` nameserver). |
-| `rfc2136_dns_port`                 | `53`                         | RFC2136 DNS server port.                               |
-| `rfc2136_tsig_secret_value`        | _(unset)_                    | TSIG secret value.                                      |
-| `rfc2136_tsig_secret_alg`          | _(unset)_                    | TSIG algorithm (e.g. `hmac-sha512`).                    |
-| `rfc2136_tsig_secret_keyname`      | _(unset)_                    | TSIG key name.                                          |
-| `external_dns_namespace`           | `external-dns`               | Namespace ExternalDNS is deployed into.                 |
-| `external_dns_log_level`           | `debug`                      | ExternalDNS log level.                                  |
-| `external_dns_txt_owner_id`        | `dynamic-zones-dns`          | Owner ID written into the registry TXT records. Make this unique per cluster when several clusters share a zone. |
-| `external_dns_txt_prefix`          | `dynamic-zones-dns-`         | Prefix for the registry TXT records.                    |
-| `external_dns_exclude_target_nets` | _(RFC1918/CGNAT/ULA/link-local)_ | CIDRs ExternalDNS must never publish (e.g. private/NAT addresses on a dual-stack node). |
-| `external_dns_version`             | `v0.19.0`                    | ExternalDNS Helm chart version.                         |
+| Variable                           | Default                          | Description                                                                                                      |
+| ---------------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `rfc2136_zone`                     | _(unset)_                        | DNS zone. Leave unset to skip ExternalDNS installation.                                                          |
+| `rfc2136_dns_host`                 | `141.72.5.244`                   | RFC2136 DNS server IP (also the cert-manager `dns01` nameserver). Defaults to the DHBW DNS server; override for other environments. |
+| `rfc2136_dns_port`                 | `53`                             | RFC2136 DNS server port.                                                                                         |
+| `rfc2136_tsig_secret_value`        | _(unset)_                        | TSIG secret value.                                                                                               |
+| `rfc2136_tsig_secret_alg`          | _(unset)_                        | TSIG algorithm (e.g. `hmac-sha512`).                                                                             |
+| `rfc2136_tsig_secret_keyname`      | _(unset)_                        | TSIG key name.                                                                                                   |
+| `external_dns_namespace`           | `external-dns`                   | Namespace ExternalDNS is deployed into.                                                                          |
+| `external_dns_log_level`           | `debug`                          | ExternalDNS log level.                                                                                           |
+| `external_dns_txt_owner_id`        | `dynamic-zones-dns`              | Owner ID written into the registry TXT records. Make this unique per cluster when several clusters share a zone. |
+| `external_dns_txt_prefix`          | `dynamic-zones-dns-`             | Prefix for the registry TXT records.                                                                             |
+| `external_dns_exclude_target_nets` | _(RFC1918/CGNAT/ULA/link-local)_ | CIDRs ExternalDNS must never publish (e.g. private/NAT addresses on a dual-stack node).                          |
+| `external_dns_version`             | `v0.19.0`                        | ExternalDNS Helm chart version.                                                                                  |
 
 ---
 
@@ -309,3 +307,37 @@ Use it with:
 export KUBECONFIG=./kubeconfig-141.72.5.244.yaml
 kubectl get nodes
 ```
+
+---
+
+## Changelog
+
+This role uses calendar versioning (`YYYY.MM.DD`).
+
+### 2026.06.02
+
+**⚠️ Breaking — variable renames.** Update your inventory / `group_vars` / `host_vars`:
+
+| Old name                           | New name                           |
+| ---------------------------------- | ---------------------------------- |
+| `rfc2136_dns_tsig_secret_alg`      | `rfc2136_tsig_secret_alg`          |
+| `rfc_2136_dns_host`                | `rfc2136_dns_host`                 |
+| `rfc_2136_dns_port`                | `rfc2136_dns_port`                 |
+| `external_dns_cluster_issuer_name` | `cert_manager_cluster_issuer_name` |
+
+`rfc2136_zone`, `rfc2136_tsig_secret_value` and `rfc2136_tsig_secret_keyname` are unchanged. `rfc2136_dns_host` keeps its default of `141.72.5.244` (the DHBW DNS server) — only its name changed.
+
+**Added**
+- Optional **Longhorn** distributed block storage (`longhorn_enabled`, off by default) for replicated, node-independent volumes — recommended for multi-node clusters. Installs the iSCSI/NFS node prerequisites on all nodes; can become the default StorageClass (`longhorn_default_storage_class`). Aborts early if `longhorn_replica_count` exceeds the cluster node count. Default replica count is `1` (teaching-friendly; raise to `3` for production).
+- Pinnable tool versions in bootstrap: `helm_version`, `kubectl_version`, `skaffold_version` (empty = latest, as before).
+- `bootstrap_install_client_tools` to toggle Helm/kubectl/Skaffold + shell aliases/completions.
+- Configurable ExternalDNS registry ownership: `external_dns_txt_owner_id`, `external_dns_txt_prefix`.
+
+**Changed**
+- Client/developer tooling (Helm, kubectl, Skaffold, aliases, completions) is now installed on the **server node only** — agents have no kubeconfig.
+- Task files renumbered so the filename order matches the execution order (`00_network` → `03_network`; k3s install and add-ons shifted to `04`–`08`, Longhorn is `09`). No user-facing variables affected.
+- README: documented previously undocumented variables, added a **Storage** section and this changelog; fixed the single-node example.
+
+**Fixed**
+- ExternalDNS: the Helm install now reads the rendered values file via the `external_dns_values_file` variable instead of a hardcoded path.
+- Removed a misleading copy-paste comment in the ExternalDNS task and corrected the (mis-described) ClusterIssuer-name variable.
