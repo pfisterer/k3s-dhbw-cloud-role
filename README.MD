@@ -1,14 +1,15 @@
 # k3s-dhbw-cloud-role
 
-Ansible Role for the installation and configuration of a production-ready K3s cluster, specifically optimized for the infrastructure requirements of the [DHBW Cloud](https://dhbw.cloud) (only accessible from the DHBW network).
+An Ansible role that turns one or more Linux hosts into a ready-to-use [k3s](https://k3s.io) Kubernetes cluster for the [DHBW Cloud](https://dhbw.cloud) (reachable from the DHBW network).
 
-This role automates the bootstrapping of Linux hosts and the deployment of essential cloud-native components:
-- **K3s:** Lightweight Kubernetes distribution (server or agent mode).
-- **CNI:** k3s' built-in flannel (plus kube-proxy and the network-policy controller) — the k3s defaults; works in IPv4, IPv6 and dual-stack on a single interface (see [CNI: flannel](#cni-flannel)).
-- **NGINX Ingress Controller:** For external routing of traffic (optional, can be disabled in favour of the built-in Traefik).
-- **Cert-Manager:** For automated issuance and renewal of TLS certificates (ACME).
-- **ExternalDNS:** For automatic management of DNS records (supports RFC2136/TSIG).
-- **Longhorn:** Distributed, replicated block storage for node-independent volumes (optional, off by default — recommended for multi-node clusters).
+The point of the role is that the fiddly parts — **DNS** and **TLS** — are handled for you. Once it has run, every app you deploy automatically gets:
+
+- **A public DNS name** — for any Ingress with a hostname under your zone, [ExternalDNS](https://kubernetes-sigs.github.io/external-dns/) creates the DNS record for you.
+- **Valid HTTPS** — [cert-manager](https://cert-manager.io) obtains and auto-renews a TLS certificate (one wildcard `*.<your-zone>` by default), so your app is reachable over HTTPS with no per-app setup.
+
+You also get a full k3s cluster (one server, optional worker nodes), the built-in **Traefik** ingress, IPv4 / IPv6 / dual-stack support, and optional replicated storage ([Longhorn](https://longhorn.io)).
+
+To use it you only need to supply: the **host(s)** to install on, and — for certificates and DNS — an **email** and a **DNS zone**.
 
 ---
 
@@ -34,7 +35,7 @@ ansible-galaxy install -r requirements.yml
 
 ### Single-node (default)
 
-The simplest case — one host, full k3s server with all add-ons. No extra configuration needed.
+One host, full k3s server with all add-ons.
 
 **`inventory.yml`**
 ```yaml
@@ -44,6 +45,14 @@ all:
       ansible_user: ubuntu
       ip_family: ipv4
       cert_manager_email: your@mail.com
+
+      # DNS + automatic (wildcard) TLS — set these to enable ExternalDNS and DNS-01.
+      # Without them you still get a working cluster, just no automatic DNS/HTTPS.
+      # DHBW: get your zone and TSIG key from https://self-service.dhbw.cloud
+      rfc2136_zone: your-zone.example.com
+      rfc2136_tsig_secret_value: "<TSIG key>"
+      rfc2136_tsig_secret_alg: hmac-sha512
+      rfc2136_tsig_secret_keyname: "<TSIG key name>"
 ```
 
 **`playbook.yml`**
@@ -55,6 +64,40 @@ all:
   roles:
     - role: k3s-dhbw-cloud-role
 ```
+
+---
+
+### Exposing an app with DNS + TLS
+
+This is the part you'll use most. Deploy your app, then create an **Ingress** with a hostname under your zone — DNS and HTTPS are then automatic:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: myapp
+spec:
+  rules:
+    - host: myapp.your-zone.example.com      # must be under your rfc2136_zone
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: myapp
+                port:
+                  number: 80
+  tls:
+    - hosts: [myapp.your-zone.example.com]    # served by the cluster's wildcard certificate
+```
+
+What happens automatically:
+
+- **DNS:** ExternalDNS sees the hostname and publishes the matching record.
+- **HTTPS:** Traefik serves the cluster's wildcard certificate for any host under `*.your-zone.example.com` — you don't request a certificate per app.
+
+Need a **dedicated** (non-wildcard) certificate for a host? Add the annotation `cert-manager.io/cluster-issuer: certificate-cluster-issuer` and a `secretName` to the `tls` entry, and cert-manager issues one just for that host.
 
 ---
 
@@ -90,29 +133,6 @@ all:
             "141.72.5.101":
               ansible_user: root
             "141.72.5.102":
-              ansible_user: root
-
-    # -----------------------------------------------------------------------
-    # STAGING
-    # -----------------------------------------------------------------------
-    staging:
-      children:
-        staging_k3s_server:
-          vars:
-            k3s_role: server
-          hosts:
-            "141.72.176.135":
-              ansible_user: root
-              ip_family: ipv4
-              cert_manager_email: your@mail.com
-              # ... all other role variables ...
-
-        staging_k3s_agent:
-          vars:
-            k3s_role: agent
-            k3s_server_host: "141.72.176.135"
-          hosts:
-            "141.72.176.201":
               ansible_user: root
 ```
 
@@ -173,40 +193,26 @@ needed in the common case.
 ```
 
 Notes:
-- In IPv6-only / NAT setups, prefer the DNS-01 challenge (`cert_manager_preferred_challenge: dns01`, requires the RFC2136 variables) over HTTP-01, since the ACME server must otherwise reach the ingress over the chosen family.
+- The DNS-01 challenge is the default (`cert_manager_preferred_challenge: dns01`, requires the RFC2136 variables) — it works in IPv6-only / NAT setups where the ACME server cannot otherwise reach the ingress over the chosen family, and it is the only challenge that can issue the wildcard certificate. It falls back to HTTP-01 when the RFC2136 variables are unset.
 - ExternalDNS manages `A`, `AAAA` and `CNAME` records, so IPv6 ingress addresses are published automatically.
 - The default IPv6 pod/service CIDRs are ULA ranges (`fd00:42::/56` / `fd00:43::/112`); override `k3s_cluster_cidr_ipv6` / `k3s_service_cidr_ipv6` to use routed (GUA) prefixes.
 
 ---
-
-## CNI: flannel
-
-This role uses k3s' built-in **flannel** CNI — the k3s default — together with kube-proxy and the network-policy controller. No extra CNI install or teardown steps are required (`k3s-killall.sh` / `k3s-uninstall.sh` work as-is). The only CNI-related install flag the role adds is `--flannel-ipv6-masq`, and only when IPv6 is in use, so ULA (`fd00::/8`) pods can still egress.
-
-flannel's single-device VXLAN handles IPv4, IPv6 and dual-stack fine when every family lives on **one** interface. It cannot route two families that live on *different* interfaces (a split-NIC setup, e.g. routable IPv6 on one NIC and NATed IPv4 on another) — for that topology you'd need a CNI that can route each family out its own interface. See the [k3s networking guide](https://docs.k3s.io/networking/basic-network-options).
-
----
-
 ## Storage
 
-By default k3s ships Rancher's **`local-path`** provisioner as the default StorageClass. It is **node-local**: a PVC is provisioned as a directory on whichever node the first consuming pod lands on, and the resulting PV is pinned to that node. That is fine for a single node, but in a **multi-node** cluster it means:
+k3s' built-in **`local-path`** storage puts a volume in a directory on the node where the pod first starts, and pins it there. That is fine for a **single node**, but on a **multi-node** cluster it means no failover (a pod rescheduled to another node can't reach its data) and `ReadWriteOnce` only.
 
-- A pod that gets rescheduled to another node (drain, node failure) cannot reach its data and stays `Pending` — there is **no failover**.
-- Only `ReadWriteOnce` is supported (no `ReadWriteMany`).
+So the role **enables Longhorn automatically on a multi-node cluster** (and leaves it off on a single node). Longhorn provides replicated, node-independent block storage with `RWO`/`RWX`, snapshots and backups. The role installs the required node packages (iSCSI/NFS) on every node and, by default, makes Longhorn the single default StorageClass (disabling `local-path`).
 
-For real multi-node persistence, enable **Longhorn** (`longhorn_enabled: true`), which provides replicated, node-independent block storage with `RWO`/`RWX`, snapshots and backups:
+You can override the auto-detection and tune replication:
 
 ```yaml
-longhorn_enabled: true
-# longhorn_replica_count defaults to 1 (works on any cluster size, fine for labs);
-# raise to 3 on a >= 3-node cluster for production redundancy.
-longhorn_replica_count: 1
-longhorn_default_storage_class: true   # makes Longhorn the default; disables k3s' local-path so it's the only default
+longhorn_enabled: true                 # force on/off instead of auto-detecting from the node count
+longhorn_replica_count: 1              # 1 works on any cluster size (labs); use 3 on a >= 3-node cluster
+longhorn_default_storage_class: true   # make Longhorn the default StorageClass
 ```
 
-When enabled, the role installs the iSCSI/NFS node prerequisites (`open-iscsi`, `nfs-common`, `iscsid`) on **every** node automatically. Longhorn provides a `longhorn` StorageClass; with `longhorn_default_storage_class: true` the role disables k3s' built-in `local-path` storage (`--disable=local-storage`), leaving Longhorn as the sole, unambiguous default StorageClass. (k3s' deploy controller owns the `local-path` SC and would otherwise reconcile its default-class flag back on every restart, so disabling it at the source is the only durable way to avoid two default StorageClasses.)
-
-> Note: the k3s server still stores cluster state in a single-node datastore (`/var/lib/rancher/k3s/server`). Longhorn replicates **application** volumes, not the control-plane state — back up the server datastore separately.
+> Note: Longhorn replicates **application** volumes, not the k3s control-plane state (`/var/lib/rancher/k3s/server`) — back that up separately.
 
 ---
 
@@ -234,19 +240,18 @@ All variables are defined in `defaults/main.yml` and can be overridden per host 
 | `k3s_node_external_ip`  | `""`                        | Externally reachable node IP (`--node-external-ip`). Empty = auto-detect from the address Ansible connects through (`ansible_host`) whenever it differs from the internal interface address (e.g. NAT).  |
 | `k3s_exec_args`         | `""`                        | Set to a non-empty string to **fully override** the dynamically computed k3s server install arguments. Empty = use the computed args.                                                                    |
 | `k3s_extra_exec_args`   | `""`                        | Extra arguments appended verbatim to the computed k3s server install arguments.                                                                                                                          |
-| `ingress_nginx_enabled` | `true`                      | Set to `false` to skip NGINX Ingress Controller and keep the built-in Traefik instead. Also adjusts the cert-manager HTTP-01 solver class accordingly.                                                   |
 | `kubeconfig_root`       | `/etc/rancher/k3s/k3s.yaml` | Path to the kubeconfig on the server node.                                                                                                                                                               |
 | `kubeconfig_path`       | `""`                        | Where the server's kubeconfig is fetched on the control node (path + filename). Empty = default `./kubeconfig-<inventory_host>.yaml`. Set to a fixed path to always write/overwrite the same file.       |
 
 ### Storage (Longhorn)
 
-| Variable                         | Default           | Description                                                                                                                                           |
-| -------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `longhorn_enabled`               | `false`           | Install Longhorn for replicated, node-independent volumes. Installs the iSCSI/NFS prerequisites on all nodes.                                         |
-| `longhorn_namespace`             | `longhorn-system` | Namespace Longhorn is deployed into.                                                                                                                  |
-| `longhorn_version`               | `""`              | Longhorn Helm chart version. Empty = latest; pin a tag (e.g. `1.7.2`) for reproducible installs.                                                      |
-| `longhorn_replica_count`         | `1`               | Default replicas per volume. Must be `<=` the number of nodes (asserted). `1` suits teaching/labs; raise to `3` (≥3 nodes) for production redundancy. |
-| `longhorn_default_storage_class` | `true`            | Make Longhorn the default StorageClass. When `true`, k3s' built-in `local-path` storage is disabled (`--disable=local-storage`) so Longhorn is the only default.                                         |
+| Variable                         | Default           | Description                                                                                                                                                                                                 |
+| -------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `longhorn_enabled`               | _auto_            | Install Longhorn for replicated, node-independent volumes. Auto: **on** for a multi-node run, **off** for a single node. Set `true`/`false` to override. Installs the iSCSI/NFS prerequisites on all nodes. |
+| `longhorn_namespace`             | `longhorn-system` | Namespace Longhorn is deployed into.                                                                                                                                                                        |
+| `longhorn_version`               | `""`              | Longhorn Helm chart version. Empty = latest; pin a tag (e.g. `1.7.2`) for reproducible installs.                                                                                                            |
+| `longhorn_replica_count`         | `1`               | Default replicas per volume. Must be `<=` the number of nodes (asserted). `1` suits teaching/labs; raise to `3` (≥3 nodes) for production redundancy.                                                       |
+| `longhorn_default_storage_class` | `true`            | Make Longhorn the default StorageClass. When `true`, k3s' built-in `local-path` storage is disabled (`--disable=local-storage`) so Longhorn is the only default.                                            |
 
 ### Bootstrap / client tooling
 
@@ -261,35 +266,39 @@ These tools (Helm, kubectl, Skaffold, shell aliases and completions) are install
 
 ### Cert-Manager
 
-| Variable                                | Default                           | Description                                                                                                                                                            |
-| --------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cert_manager_email`                    | `""`                              | ACME account email. Leave empty to skip cert-manager installation.                                                                                                     |
-| `cert_manager_url`                      | `https://certificates.dhbw.cloud` | ACME server URL.                                                                                                                                                       |
-| `cert_manager_namespace`                | `cert-manager`                    | Deployment namespace.                                                                                                                                                  |
-| `cert_manager_preferred_challenge`      | `http01`                          | Challenge type: `http01` or `dns01`. `dns01` needs the RFC2136 vars (see ExternalDNS) and uses the role-created TSIG secret; falls back to `http01` if they are unset. |
-| `cert_manager_rfc2136_tsig_secret_name` | `cert-manager-rfc2136-tsig`       | Name of the Secret the role creates (in the cert-manager namespace) holding the RFC2136 TSIG key for the `dns01` solver.                                               |
-| `cert_manager_cluster_issuer_name`      | `certificate-cluster-issuer`      | Name of the ClusterIssuer this role creates. Reference it from your Ingress/IngressRoute (e.g. the `cert-manager.io/cluster-issuer` annotation).                       |
-| `cert_manager_private_key_secret_name`  | `cert-manager-private-key-secret` | Secret name for the ACME account private key (`privateKeySecretRef`).                                                                                                  |
-| `cert_manager_eab_keyid`                | `""`                              | External Account Binding Key ID (optional).                                                                                                                            |
-| `cert_manager_eab_secret`               | `""`                              | External Account Binding MAC key (optional).                                                                                                                           |
-| `cert_manager_eab_secret_name`          | `cert-manager-eab-secret`         | Secret name holding the EAB MAC key (only used when EAB is set).                                                                                                       |
+| Variable                                | Default                           | Description                                                                                                                                                                                                                  |
+| --------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cert_manager_email`                    | `""`                              | ACME account email. Leave empty to skip cert-manager installation.                                                                                                                                                           |
+| `cert_manager_url`                      | `https://certificates.dhbw.cloud` | ACME server URL.                                                                                                                                                                                                             |
+| `cert_manager_namespace`                | `cert-manager`                    | Deployment namespace.                                                                                                                                                                                                        |
+| `cert_manager_preferred_challenge`      | `dns01`                           | Challenge type: `dns01` or `http01`. `dns01` (default) needs the RFC2136 vars (see ExternalDNS) and uses the role-created TSIG secret; falls back to `http01` if they are unset.                                             |
+| `cert_manager_rfc2136_tsig_secret_name` | `cert-manager-rfc2136-tsig`       | Name of the Secret the role creates (in the cert-manager namespace) holding the RFC2136 TSIG key for the `dns01` solver.                                                                                                     |
+| `cert_manager_wildcard_secret_name`     | `wildcard-tls`                    | Name of the TLS Secret (in the Traefik namespace) holding the wildcard cert+key. When `dns01` is active the role issues a `*.<rfc2136_zone>` wildcard cert into this Secret and registers it as Traefik's default TLS store. |
+| `cert_manager_cluster_issuer_name`      | `certificate-cluster-issuer`      | Name of the ClusterIssuer this role creates. Reference it from your Ingress/IngressRoute (e.g. the `cert-manager.io/cluster-issuer` annotation).                                                                             |
+| `traefik_namespace`                     | `kube-system`                     | Namespace Traefik runs in (k3s bundles it in `kube-system`). The wildcard Secret and the default `TLSStore` are created here.                                                                                                |
+| `cert_manager_private_key_secret_name`  | `cert-manager-private-key-secret` | Secret name for the ACME account private key (`privateKeySecretRef`).                                                                                                                                                        |
+| `cert_manager_eab_keyid`                | `""`                              | External Account Binding Key ID (optional).                                                                                                                                                                                  |
+| `cert_manager_eab_secret`               | `""`                              | External Account Binding MAC key (optional).                                                                                                                                                                                 |
+| `cert_manager_eab_secret_name`          | `cert-manager-eab-secret`         | Secret name holding the EAB MAC key (only used when EAB is set).                                                                                                                                                             |
 
 ### ExternalDNS (RFC2136)
 
-| Variable                           | Default                          | Description                                                                                                      |
-| ---------------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `rfc2136_zone`                     | _(unset)_                        | DNS zone. Leave unset to skip ExternalDNS installation.                                                          |
+> **DHBW users:** register a DNS zone and generate the matching TSIG key (`rfc2136_zone`, `rfc2136_tsig_secret_value`, `rfc2136_tsig_secret_alg`, `rfc2136_tsig_secret_keyname`) at [self-service.dhbw.cloud](https://self-service.dhbw.cloud).
+
+| Variable                           | Default                          | Description                                                                                                                         |
+| ---------------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `rfc2136_zone`                     | _(unset)_                        | DNS zone. Leave unset to skip ExternalDNS installation.                                                                             |
 | `rfc2136_dns_host`                 | `141.72.5.244`                   | RFC2136 DNS server IP (also the cert-manager `dns01` nameserver). Defaults to the DHBW DNS server; override for other environments. |
-| `rfc2136_dns_port`                 | `53`                             | RFC2136 DNS server port.                                                                                         |
-| `rfc2136_tsig_secret_value`        | _(unset)_                        | TSIG secret value.                                                                                               |
-| `rfc2136_tsig_secret_alg`          | _(unset)_                        | TSIG algorithm (e.g. `hmac-sha512`).                                                                             |
-| `rfc2136_tsig_secret_keyname`      | _(unset)_                        | TSIG key name.                                                                                                   |
-| `external_dns_namespace`           | `external-dns`                   | Namespace ExternalDNS is deployed into.                                                                          |
-| `external_dns_log_level`           | `debug`                          | ExternalDNS log level.                                                                                           |
-| `external_dns_txt_owner_id`        | `dynamic-zones-dns`              | Owner ID written into the registry TXT records. Make this unique per cluster when several clusters share a zone. |
-| `external_dns_txt_prefix`          | `dynamic-zones-dns-`             | Prefix for the registry TXT records.                                                                             |
-| `external_dns_exclude_target_nets` | _(RFC1918/CGNAT/ULA/link-local)_ | CIDRs ExternalDNS must never publish (e.g. private/NAT addresses on a dual-stack node).                          |
-| `external_dns_version`             | `v0.19.0`                        | ExternalDNS Helm chart version.                                                                                  |
+| `rfc2136_dns_port`                 | `53`                             | RFC2136 DNS server port.                                                                                                            |
+| `rfc2136_tsig_secret_value`        | _(unset)_                        | TSIG secret value.                                                                                                                  |
+| `rfc2136_tsig_secret_alg`          | _(unset)_                        | TSIG algorithm (e.g. `hmac-sha512`).                                                                                                |
+| `rfc2136_tsig_secret_keyname`      | _(unset)_                        | TSIG key name.                                                                                                                      |
+| `external_dns_namespace`           | `external-dns`                   | Namespace ExternalDNS is deployed into.                                                                                             |
+| `external_dns_log_level`           | `debug`                          | ExternalDNS log level.                                                                                                              |
+| `external_dns_txt_owner_id`        | `dynamic-zones-dns`              | Owner ID written into the registry TXT records. Make this unique per cluster when several clusters share a zone.                    |
+| `external_dns_txt_prefix`          | `dynamic-zones-dns-`             | Prefix for the registry TXT records.                                                                                                |
+| `external_dns_exclude_target_nets` | _(RFC1918/CGNAT/ULA/link-local)_ | CIDRs ExternalDNS must never publish (e.g. private/NAT addresses on a dual-stack node).                                             |
+| `external_dns_version`             | `v0.19.0`                        | ExternalDNS Helm chart version.                                                                                                     |
 
 ---
 
@@ -313,6 +322,24 @@ kubectl get nodes
 ## Changelog
 
 This role uses calendar versioning (`YYYY.MM.DD`).
+
+### 2026.06.04
+
+**⚠️ Breaking — NGINX ingress removed; DNS-01 is now the default.** Update your inventory / `group_vars` / `host_vars`:
+
+- Removed the optional NGINX ingress controller. The cluster always uses k3s' built-in **Traefik** — **remove `ingress_nginx_enabled`** from your variables.
+- `cert_manager_preferred_challenge` now defaults to **`dns01`** (was `http01`). It still falls back to `http01` when the RFC2136 variables are unset.
+
+**Added**
+- **Automatic wildcard certificate.** When DNS-01 is active (zone + TSIG key set), the role issues a single `*.<rfc2136_zone>` certificate and registers it as Traefik's default TLS store, so every app under the zone is served over HTTPS without per-app certificate setup. Tunable via `cert_manager_wildcard_secret_name` and `traefik_namespace`.
+
+**Removed**
+- `ingress_nginx_enabled` and the NGINX install task / Helm repository.
+
+**Changed**
+- **Longhorn now defaults to auto:** enabled on a multi-node run, disabled on a single node (was always off). Override by setting `longhorn_enabled` explicitly.
+- Task files renumbered after the NGINX removal (cert-manager `06`, ExternalDNS `07`, Longhorn `08`). No user-facing variables affected.
+- README reorganized to lead with what the role provides (DNS + TLS) and how to expose an app; technical details moved further down.
 
 ### 2026.06.02
 

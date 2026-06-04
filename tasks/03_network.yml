@@ -72,7 +72,6 @@
     _k3s_exec_args: >-
       {{ [
            ('--flannel-ipv6-masq' if _ipv6_involved else ''),
-           ('--disable=traefik' if ingress_nginx_enabled | bool else ''),
            ('--disable=local-storage' if (longhorn_enabled | bool and longhorn_default_storage_class | bool) else ''),
            ('--tls-san=' + (_tls_sans | join(' --tls-san='))) if (_tls_sans | length > 0) else '',
            '--cluster-cidr=' + (_cluster_cidr_list | join(',')),

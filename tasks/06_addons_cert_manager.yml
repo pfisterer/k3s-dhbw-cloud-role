@@ -77,3 +77,49 @@
         src: /tmp/cluster_issuer.yaml
         kubeconfig: "{{ kubeconfig_root }}"
         state: present
+
+    # --- Wildcard certificate. Whenever dns01 is the active challenge (a zone and
+    # TSIG key are set — the same condition under which the ClusterIssuer uses the
+    # dns01 solver) the role issues one wildcard cert covering *.<rfc2136_zone>,
+    # replacing the per-host certs. cert-manager stores the cert+key in a TLS
+    # Secret in the Traefik namespace. A wildcard cannot be validated via http01.
+    - name: Request wildcard certificate via the DNS-01 solver
+      when: &wildcard_active
+        - cert_manager_preferred_challenge == 'dns01'
+        - rfc2136_zone | default('') | length > 0
+        - rfc2136_tsig_secret_value | default('') | length > 0
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_root }}"
+        state: present
+        definition:
+          apiVersion: cert-manager.io/v1
+          kind: Certificate
+          metadata:
+            name: "{{ cert_manager_wildcard_secret_name }}"
+            namespace: "{{ traefik_namespace }}"
+          spec:
+            secretName: "{{ cert_manager_wildcard_secret_name }}"
+            dnsNames:
+              - "*.{{ rfc2136_zone }}"
+            issuerRef:
+              name: "{{ cert_manager_cluster_issuer_name }}"
+              kind: ClusterIssuer
+
+    # --- Traefik default TLS store. Traefik serves this certificate for any
+    # HTTPS host whose SNI has no more-specific certificate, so Ingresses need
+    # not reference a TLS Secret at all. Must be named "default" and live in the
+    # Traefik namespace alongside the wildcard Secret.
+    - name: Register wildcard certificate as the Traefik default TLS store
+      when: *wildcard_active
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_root }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: TLSStore
+          metadata:
+            name: default
+            namespace: "{{ traefik_namespace }}"
+          spec:
+            defaultCertificate:
+              secretName: "{{ cert_manager_wildcard_secret_name }}"

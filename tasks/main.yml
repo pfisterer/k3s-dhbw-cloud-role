@@ -20,22 +20,17 @@
   tags: [helm]
   when: k3s_role == 'server'
 
-- name: Include ingress nginx addons tasks
-  ansible.builtin.include_tasks: 06_addons_ingress_nginx.yml
-  tags: [ingress]
-  when: k3s_role == 'server' and ingress_nginx_enabled | bool
-
 - name: Include cert manager addons tasks
-  ansible.builtin.include_tasks: 07_addons_cert_manager.yml
+  ansible.builtin.include_tasks: 06_addons_cert_manager.yml
   tags: [certmanager]
   when: k3s_role == 'server'
 
 - name: Include external DNS addons tasks
-  ansible.builtin.include_tasks: 08_addons_external_dns.yml
+  ansible.builtin.include_tasks: 07_addons_external_dns.yml
   tags: [externaldns]
   when: k3s_role == 'server'
 
 - name: Include longhorn addon tasks
-  ansible.builtin.include_tasks: 09_addons_longhorn.yml
+  ansible.builtin.include_tasks: 08_addons_longhorn.yml
   tags: [longhorn, storage]
   when: k3s_role == 'server' and longhorn_enabled | bool

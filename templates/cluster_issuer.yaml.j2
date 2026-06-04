@@ -38,10 +38,10 @@ spec:
                     tsigKeyName: "{{ rfc2136_tsig_secret_keyname }}"
                     tsigAlgorithm: "{{ rfc2136_tsig_secret_alg | replace('-', '') | upper }}"
                     tsigSecretSecretRef:
-                        name: "{{ cert_manager_rfc2136_tsig_secret_name }}" # k8s Secret with the TSIG key, created in 07_addons_cert_manager.yml
+                        name: "{{ cert_manager_rfc2136_tsig_secret_name }}" # k8s Secret with the TSIG key, created in 06_addons_cert_manager.yml
                         key: secret
 {% else %}
             - http01:
                 ingress:
-                    class: "{{ 'nginx' if ingress_nginx_enabled else 'traefik' }}"
+                    class: "traefik"
 {% endif %}

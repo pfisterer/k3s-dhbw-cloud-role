@@ -48,8 +48,8 @@ k3s_server_host: ""
 # K3s installation arguments passed to the install script (via INSTALL_K3S_EXEC).
 # By default these are computed dynamically in tasks/03_network.yml from the
 # selected ip_family/ip_family_primary: --flannel-ipv6-masq when IPv6 is in use,
-# Traefik disabled when NGINX is enabled, and --tls-san, --cluster-cidr,
-# --service-cidr, --node-ip and --node-external-ip as needed.
+# and --tls-san, --cluster-cidr, --service-cidr, --node-ip and
+# --node-external-ip as needed.
 # Set this to a non-empty string only to fully override the computed arguments.
 k3s_exec_args: ""
 
@@ -82,20 +82,16 @@ kubectl_version: ""
 skaffold_version: "latest"
 
 # -----------------------------------------------------------------------------
-## 🔌 Add-on: NGINX Ingress Controller
-# -----------------------------------------------------------------------------
-# Set to false to skip installing the NGINX Ingress Controller.
-ingress_nginx_enabled: true
-
-# -----------------------------------------------------------------------------
 ## 💾 Add-on: Longhorn (distributed block storage)
 # -----------------------------------------------------------------------------
-# Set to true to install Longhorn for replicated, node-independent volumes
-# (recommended for multi-node clusters — the k3s default local-path is node-local
-# and offers no failover). Longhorn attaches volumes via iSCSI on EVERY node and
-# uses NFS for RWX volumes, so open-iscsi + nfs-common are installed automatically
-# on all nodes during bootstrap when this is enabled.
-longhorn_enabled: false
+# Install Longhorn for replicated, node-independent volumes. Auto-detects the
+# cluster size: ON when this Ansible run targets more than one host (multi-node,
+# where the k3s-default local-path storage is node-local and offers no failover),
+# OFF on a single node (local-path is enough and replication buys nothing). Set
+# explicitly to true or false to override the auto-detection. Longhorn attaches
+# volumes via iSCSI on EVERY node and uses NFS for RWX volumes, so open-iscsi +
+# nfs-common are installed automatically on all nodes during bootstrap when on.
+longhorn_enabled: "{{ (ansible_play_hosts_all | default([]) | length) > 1 }}"
 longhorn_namespace: longhorn-system
 
 # Longhorn Helm chart version. Empty = latest from the chart repository; pin a tag
@@ -146,11 +142,12 @@ cert_manager_eab_secret_name: "cert-manager-eab-secret"
 # Namespace in which cert-manager will be deployed
 cert_manager_namespace: cert-manager
 
-# Set to http01 or dns01 (e.g., for wildcard certificates). dns01 requires the
-# RFC2136 vars below (rfc2136_zone / rfc2136_tsig_secret_value /
-# rfc2136_tsig_secret_alg / rfc2136_tsig_secret_keyname); if they are unset
-# the ClusterIssuer silently falls back to http01.
-cert_manager_preferred_challenge: http01
+# Set to dns01 or http01. dns01 (the default) requires the RFC2136 vars below
+# (rfc2136_zone / rfc2136_tsig_secret_value / rfc2136_tsig_secret_alg /
+# rfc2136_tsig_secret_keyname); if they are unset the ClusterIssuer silently
+# falls back to http01. dns01 is the only challenge that can issue wildcards, so
+# selecting it (with a zone set) also enables the wildcard cert below.
+cert_manager_preferred_challenge: dns01
 
 # Name of the k8s Secret (in cert_manager_namespace) the role creates to hold the
 # RFC2136 TSIG key for the dns01 solver. Only created when dns01 is selected.
@@ -160,6 +157,28 @@ cert_manager_rfc2136_tsig_secret_name: "cert-manager-rfc2136-tsig"
 # Ingress/IngressRoute (e.g. the cert-manager.io/cluster-issuer annotation) to
 # request certificates from it.
 cert_manager_cluster_issuer_name: certificate-cluster-issuer
+
+# --- Wildcard certificate + Traefik default TLS store ----------------------
+# Whenever dns01 is the active challenge (preferred_challenge=dns01 and the
+# RFC2136 vars are set) the role issues a single wildcard certificate covering
+# *.<rfc2136_zone> and registers it as Traefik's default TLS store, so Traefik
+# serves it for any HTTPS host that has no more-specific certificate. One cert
+# replaces the per-host certs. A wildcard matches exactly one label, so
+# *.example.com covers a.example.com but NOT the apex example.com nor
+# a.b.example.com.
+#
+# This is additive and non-breaking: existing per-host certs keep winning by
+# SNI until you remove their cert-manager.io/cluster-issuer annotations at the
+# source (Helm values / CR / manifest) and delete the per-host Certificate
+# objects.
+#
+# Name of the TLS Secret holding the wildcard cert+key. Created by cert-manager
+# in traefik_namespace so Traefik (and the default TLSStore) can read it.
+cert_manager_wildcard_secret_name: "wildcard-tls"
+
+# Namespace Traefik runs in (k3s bundles Traefik in kube-system). The wildcard
+# Secret and the default TLSStore must live here for Traefik to use them.
+traefik_namespace: kube-system
 
 # -----------------------------------------------------------------------------
 ## 🌐 Add-on: External DNS
