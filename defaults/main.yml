@@ -30,6 +30,29 @@ k3s_service_cidr_ipv6: "fd00:43::/112"
 k3s_node_external_ip: ""
 
 # -----------------------------------------------------------------------------
+## 🩺 Preflight: inter-node overlay connectivity check
+# -----------------------------------------------------------------------------
+# Before installing k3s, verify the flannel overlay port is reachable between
+# every pair of nodes in BOTH directions. OpenStack security groups often allow
+# SSH/API (TCP) and ICMP but silently drop the VXLAN UDP port — the cluster then
+# forms (all nodes Ready) yet cross-node pod traffic is black-holed. The check
+# tests the real overlay port with a cooperative listener (a ping would give
+# false confidence) and fails early with an actionable message.
+#
+# Auto-enabled only for multi-node runs (a single node has no peers to test).
+# Set to false to skip it, or true to force it on.
+preflight_connectivity_check: "{{ (ansible_play_hosts_all | default([]) | length) > 1 }}"
+
+# Overlay UDP port to probe. 0 = auto-detect: 8472 for the default flannel VXLAN
+# backend, or 51820 when 'wireguard' appears in k3s_extra_exec_args. Set a fixed
+# port for other backends (e.g. 51821 for wireguard-native over IPv6).
+preflight_overlay_port: 0
+
+# Seconds each destination node listens while its peers send probes. The default
+# is comfortably longer than the senders need; raise it only on very slow links.
+preflight_probe_duration: 5
+
+# -----------------------------------------------------------------------------
 ## 🚀 K3s Node Role
 # -----------------------------------------------------------------------------
 # Set to "server" for the control-plane node or "agent" for worker nodes.

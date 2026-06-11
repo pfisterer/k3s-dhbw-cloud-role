@@ -66,7 +66,6 @@ all:
 ```
 
 ---
-
 ### Exposing an app with DNS + TLS
 
 This is the part you'll use most. Deploy your app, then create an **Ingress** with a hostname under your zone — DNS and HTTPS are then automatic:
@@ -243,6 +242,16 @@ All variables are defined in `defaults/main.yml` and can be overridden per host 
 | `kubeconfig_root`       | `/etc/rancher/k3s/k3s.yaml` | Path to the kubeconfig on the server node.                                                                                                                                                               |
 | `kubeconfig_path`       | `""`                        | Where the server's kubeconfig is fetched on the control node (path + filename). Empty = default `./kubeconfig-<inventory_host>.yaml`. Set to a fixed path to always write/overwrite the same file.       |
 
+### Preflight (connectivity)
+
+Before installing k3s, the role checks that the flannel overlay port is reachable between all nodes in **both directions** — see the [connectivity preflight note](#multi-node-server--agents) above for why this matters.
+
+| Variable                       | Default | Description                                                                                                                                                                                            |
+| ------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `preflight_connectivity_check` | _auto_  | Verify the flannel overlay port is reachable between all nodes in both directions before installing k3s. Auto: **on** for a multi-node run, **off** for a single node. Set `true`/`false` to override. |
+| `preflight_overlay_port`       | `0`     | Overlay UDP port to probe. `0` = auto-detect: `8472` for the default VXLAN backend, `51820` when `wireguard` appears in `k3s_extra_exec_args`. Set a fixed port for other backends.                    |
+| `preflight_probe_duration`     | `5`     | Seconds each node listens for probes from its peers. The default is comfortably longer than the senders need; raise it only on very slow links.                                                        |
+
 ### Storage (Longhorn)
 
 | Variable                         | Default           | Description                                                                                                                                                                                                 |
@@ -322,6 +331,11 @@ kubectl get nodes
 ## Changelog
 
 This role uses calendar versioning (`YYYY.MM.DD`).
+
+### 2026.06.11
+
+**Added**
+- **Inter-node connectivity preflight.** On multi-node runs the role now verifies — before installing k3s — that the flannel overlay port (VXLAN **UDP 8472** by default) is reachable between every pair of nodes in **both directions**, using a small dependency-free UDP probe against a cooperative listener on each node. This catches the common OpenStack case where the security group allows TCP/ICMP but drops the VXLAN UDP port, which otherwise forms a healthy-looking cluster that silently black-holes cross-node pod traffic. Auto-enabled for multi-node clusters; tune via `preflight_connectivity_check`, `preflight_overlay_port` and `preflight_probe_duration`.
 
 ### 2026.06.04
 

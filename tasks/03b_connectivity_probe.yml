@@ -1,0 +1,77 @@
+---
+# One probe round for a single destination node (_probe_dest): it listens on the
+# overlay port while every *other* node sends it a datagram tagged with the
+# sender's name. The destination reports which senders it heard, and we assert
+# that it heard from all of them — i.e. ingress to _probe_dest is open from every
+# peer. Looping this over all nodes (in 03b_connectivity_check.yml) covers both
+# directions, because each node is the destination exactly once.
+
+# Skip the round when _probe_dest already runs k3s: flannel holds the overlay
+# port, so the listener can't bind it (EADDRINUSE) — and a running cluster
+# already proves the port works. This makes the check a true pre-install gate
+# that no-ops on re-runs, while a fresh node added to an existing cluster is
+# still probed as a destination (existing peers reach it).
+- name: "Check whether k3s already holds the overlay port on {{ _probe_dest }}"
+  ansible.builtin.stat:
+    path: /usr/local/bin/k3s
+  delegate_to: "{{ _probe_dest }}"
+  register: _dest_k3s
+
+- name: "Skip {{ _probe_dest }}: k3s already installed (overlay port in use)"
+  ansible.builtin.debug:
+    msg: >-
+      {{ _probe_dest }} already runs k3s — flannel holds UDP {{ _flannel_overlay_port }},
+      so the live overlay already proves it. Skipping the probe into this node.
+  when: _dest_k3s.stat.exists
+
+- name: "Probe overlay reachability into {{ _probe_dest }}"
+  when: not _dest_k3s.stat.exists
+  block:
+    - name: "Start overlay listener on {{ _probe_dest }}"
+      ansible.builtin.command:
+        cmd: "python3 /tmp/udp_probe.py listen {{ _flannel_overlay_port }} {{ preflight_probe_duration }}"
+      async: "{{ (preflight_probe_duration | int) + 15 }}"
+      poll: 0
+      delegate_to: "{{ _probe_dest }}"
+      register: _listener
+      changed_when: false
+
+    - name: "Let the listener bind before sending on {{ _probe_dest }}"
+      ansible.builtin.pause:
+        seconds: 1
+
+    - name: "Send overlay probes from every peer to {{ _probe_dest }}"
+      ansible.builtin.command:
+        cmd: "python3 /tmp/udp_probe.py send {{ _flannel_overlay_port }} {{ item }} {{ hostvars[_probe_dest]._node_ip_list | join(' ') }}"
+      delegate_to: "{{ item }}"
+      loop: "{{ ansible_play_hosts | difference([_probe_dest]) }}"
+      changed_when: false
+
+    - name: "Collect listener result from {{ _probe_dest }}"
+      ansible.builtin.async_status:
+        jid: "{{ _listener.ansible_job_id }}"
+      delegate_to: "{{ _probe_dest }}"
+      register: _probe_result
+      until: _probe_result.finished
+      retries: "{{ (preflight_probe_duration | int) + 10 }}"
+      delay: 1
+      changed_when: false
+
+    - name: "Verify receive overlay probes from every peer on {{ _probe_dest }} "
+      ansible.builtin.assert:
+        that:
+          - _unreached | length == 0
+        fail_msg: >-
+          Overlay port UDP {{ _flannel_overlay_port }} is BLOCKED into {{ _probe_dest }}
+          ({{ hostvars[_probe_dest]._node_ip_list | join(', ') }}) from: {{ _unreached | join(', ') }}.
+          flannel would form the cluster but black-hole cross-node pod traffic for these
+          peers. Open UDP {{ _flannel_overlay_port }} ingress on {{ _probe_dest }} from
+          these nodes in the OpenStack security group (in both directions across the
+          cluster). Set preflight_connectivity_check=false to skip this check.
+        success_msg: >-
+          {{ _probe_dest }} reachable on UDP {{ _flannel_overlay_port }} from all
+          {{ _expected | length }} peer(s).
+      vars:
+        _expected: "{{ ansible_play_hosts | difference([_probe_dest]) }}"
+        _received: "{{ _probe_result.stdout_lines | default([]) | map('trim') | select | list }}"
+        _unreached: "{{ _expected | difference(_received) }}"

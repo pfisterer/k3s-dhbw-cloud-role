@@ -1,0 +1,42 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Preflight: verify the flannel overlay port is reachable between ALL nodes in
+# BOTH directions before k3s is installed.
+#
+# Why: k3s' default flannel backend is VXLAN (UDP 8472). OpenStack security
+# groups routinely allow SSH/API (TCP 6443) and ICMP while silently dropping the
+# VXLAN UDP port. The cluster then forms and every node shows Ready, but
+# cross-node pod traffic is black-holed — CoreDNS flakes, Services time out,
+# Longhorn replicas can't sync. We test the *actual* overlay port with a
+# cooperative listener (a ping would pass and give false confidence) and fail
+# early with an actionable message instead.
+#
+# Runs after 03_network has computed each node's --node-ip (the address flannel
+# actually uses) and before k3s is installed (so the port is still free).
+# Skipped on single-node runs and when preflight_connectivity_check is false.
+# ─────────────────────────────────────────────────────────────────────────────
+
+- name: Resolve flannel overlay UDP port and probe enablement
+  ansible.builtin.set_fact:
+    # 0 = auto: 8472 for the default VXLAN backend, 51820 when wireguard-native
+    # is requested via k3s_extra_exec_args. Override explicitly for other setups.
+    _flannel_overlay_port: >-
+      {{ (preflight_overlay_port | int) if (preflight_overlay_port | int) > 0
+         else (51820 if ('wireguard' in (k3s_extra_exec_args | default('')))
+         else 8472) }}
+    _run_connectivity_check: "{{ (preflight_connectivity_check | bool) and (ansible_play_hosts | length) > 1 }}"
+
+- name: Install UDP probe helper on all nodes
+  ansible.builtin.copy:
+    src: udp_probe.py
+    dest: /tmp/udp_probe.py
+    mode: "0755"
+  when: _run_connectivity_check
+
+- name: Probe the overlay port into each node from every peer (both directions)
+  ansible.builtin.include_tasks: 03b_connectivity_probe.yml
+  loop: "{{ ansible_play_hosts }}"
+  loop_control:
+    loop_var: _probe_dest
+  run_once: true
+  when: _run_connectivity_check

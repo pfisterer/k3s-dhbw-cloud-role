@@ -11,6 +11,10 @@
   ansible.builtin.include_tasks: 03_network.yml
   tags: [k3s, network]
 
+- name: Include inter-node connectivity preflight
+  ansible.builtin.include_tasks: 03b_connectivity_check.yml
+  tags: [k3s, network, preflight, connectivity]
+
 - name: Include k3s install tasks
   ansible.builtin.include_tasks: 04_k3s_install.yml
   tags: [k3s]
