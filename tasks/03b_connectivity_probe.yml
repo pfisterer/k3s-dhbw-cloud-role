@@ -40,11 +40,20 @@
       ansible.builtin.pause:
         seconds: 1
 
+    # Fire every peer's send concurrently (async + poll:0). A single send blocks
+    # for SEND_COUNT*SEND_INTERVAL (~1.5s) plus SSH/Python startup (~2s total).
+    # Run sequentially, N peers take N*~2s, which overruns the listener's
+    # preflight_probe_duration window once N>=3 (i.e. >=4-node clusters) — the
+    # late peers then send after the listener already exited and are reported as
+    # falsely "BLOCKED". Firing them concurrently lands all datagrams inside the
+    # window regardless of cluster size.
     - name: "Send overlay probes from every peer to {{ _probe_dest }}"
       ansible.builtin.command:
         cmd: "python3 /tmp/udp_probe.py send {{ _flannel_overlay_port }} {{ item }} {{ hostvars[_probe_dest]._node_ip_list | join(' ') }}"
       delegate_to: "{{ item }}"
       loop: "{{ ansible_play_hosts | difference([_probe_dest]) }}"
+      async: "{{ (preflight_probe_duration | int) + 10 }}"
+      poll: 0
       changed_when: false
 
     - name: "Collect listener result from {{ _probe_dest }}"
