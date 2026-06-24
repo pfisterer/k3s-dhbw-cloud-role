@@ -133,6 +133,17 @@ longhorn_replica_count: 1
 # default and you opt into Longhorn per-PVC via storageClassName: longhorn.
 longhorn_default_storage_class: true
 
+# How much storage Longhorn may *reserve* across all volumes, as a percentage of
+# each node's disk. Longhorn reserves space by the requested PVC size, not by the
+# bytes actually written; since its volumes are thin-provisioned, the reserved
+# total can safely exceed the physical disk. The chart default of 100 is tight on
+# the small lab VMs (~37 GiB usable/node) and makes larger workloads (e.g. the
+# Apache Ozone lab, which requests several volumes) fail to schedule replicas with
+# "insufficient storage". 300 gives generous headroom while the separate
+# 25%-minimal-available guard still prevents a disk from actually filling up.
+# Lower it (e.g. 100) to be conservative on nodes with larger disks.
+longhorn_storage_over_provisioning_percentage: 300
+
 # -----------------------------------------------------------------------------
 ## 📦 Helm Repository Management
 # -----------------------------------------------------------------------------

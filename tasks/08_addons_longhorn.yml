@@ -54,6 +54,10 @@
             defaultClassReplicaCount: "{{ longhorn_replica_count | int }}"
           defaultSettings:
             defaultReplicaCount: "{{ longhorn_replica_count | int }}"
+            # Allow reserving more than the raw disk size (thin-provisioned volumes).
+            # Needed so storage-hungry labs (e.g. Apache Ozone) can schedule their
+            # replicas on the small lab VMs. See longhorn_storage_over_provisioning_percentage.
+            storageOverProvisioningPercentage: "{{ longhorn_storage_over_provisioning_percentage | int }}"
         wait: true
         # Longhorn pulls several images and rolls out CRDs + DaemonSets, so give it
         # more time than the module default. Deliberately NOT atomic: a failed
