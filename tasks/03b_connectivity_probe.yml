@@ -17,7 +17,7 @@
   delegate_to: "{{ _probe_dest }}"
   register: _dest_k3s
 
-- name: "Skip {{ _probe_dest }}: k3s already installed (overlay port in use)"
+- name: "Skip: k3s already installed (overlay port in use) {{ _probe_dest }}"
   ansible.builtin.debug:
     msg: >-
       {{ _probe_dest }} already runs k3s — flannel holds UDP {{ _flannel_overlay_port }},
