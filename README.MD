@@ -13,6 +13,60 @@ To use it you only need to supply: the **host(s)** to install on, and — for ce
 
 ---
 
+## TL;DR
+
+You have a fresh Linux VM and want a Kubernetes cluster where every app automatically gets a DNS name and HTTPS. Here is the whole thing:
+
+1. **Get your DNS zone + TSIG key** (DHBW: [self-service.dhbw.cloud](https://self-service.dhbw.cloud)).
+2. **Install the role** on your machine straight from GitHub:
+   ```bash
+   ansible-galaxy install git+https://github.com/pfisterer/k3s-dhbw-cloud-role.git
+   ```
+   (or pin it via a `requirements.yml` — see [Installation](#installation)).
+3. **Describe your host** in `inventory.yml` (IP, SSH user, email, zone + TSIG key) — see [Quickstart](#quickstart-single-node) below.
+4. **Run it:**
+   ```bash
+   ansible-playbook playbook.yml -i inventory.yml
+   ```
+5. **Use the cluster:**
+   ```bash
+   export KUBECONFIG=./kubeconfig-<your-host>.yaml
+   kubectl get nodes
+   ```
+
+That's it. Deploy an app with an `Ingress` whose host is under your zone, and DNS + HTTPS happen automatically — [see how](#exposing-an-app-with-dns--tls).
+
+> **New to Ansible or Kubernetes?** Read [Before you start](#before-you-start) first — it lists what you need on your own machine and on the target host.
+
+---
+
+## Before you start
+
+You run this role **from your own computer** (the "control node"); it configures a **remote host** (the VM that becomes the cluster) over SSH. You never install anything on the VM by hand.
+
+**On your own machine you need:**
+
+- **[Ansible](https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html)** (`ansible --version` should work). On macOS: `brew install ansible`; on Debian/Ubuntu: `sudo apt install ansible`.
+- **An SSH key** that can log into the target host (`ssh <user>@<host>` should get you in without a password prompt).
+
+**On the target host you need:**
+
+- A fresh **Linux** server (Ubuntu/Debian work well) that you can reach over SSH.
+- A user with **sudo/root** rights (the playbook uses `become: true`).
+- Enough resources for k3s — see the official [k3s hardware requirements](https://docs.k3s.io/installation/requirements) (roughly 2 GB RAM / 2 vCPU as a baseline, plus whatever your workloads need).
+
+**For automatic DNS + HTTPS you also need** (optional, but the whole point of the role):
+
+- A **DNS zone** you control and a matching **TSIG key**. DHBW users register both at [self-service.dhbw.cloud](https://self-service.dhbw.cloud). Without them you still get a working cluster — just no automatic DNS/TLS.
+
+New to the terms used here?
+
+- **Control node** — your laptop, where you run `ansible-playbook`.
+- **Ingress** — a Kubernetes object that says "expose this app under this hostname". This role turns that into real DNS + HTTPS automatically.
+- **Zone** — the DNS domain your names live under, e.g. `your-name.dhbw.cloud`. Apps get names like `myapp.your-name.dhbw.cloud`.
+
+---
+
 ## Installation
 
 Add the role to your requirements file (`requirements.yml`):
@@ -33,11 +87,13 @@ ansible-galaxy install -r requirements.yml
 
 ## Usage
 
-### Single-node (default)
+### Quickstart (single node)
 
-One host, full k3s server with all add-ons.
+One host, full k3s server with all add-ons — the fastest way to get a working cluster.
 
-**`inventory.yml`**
+**Step 1 — create two files** next to each other in an empty directory.
+
+**`inventory.yml`** — describes *which* host to configure and *how*:
 ```yaml
 all:
   hosts:
@@ -55,7 +111,7 @@ all:
       rfc2136_tsig_secret_keyname: "<TSIG key name>"
 ```
 
-**`playbook.yml`**
+**`playbook.yml`** — says *what* to do (apply this role to those hosts):
 ```yaml
 ---
 - name: Deploy K3s
@@ -64,6 +120,23 @@ all:
   roles:
     - role: k3s-dhbw-cloud-role
 ```
+
+**Step 2 — run it:**
+```bash
+ansible-playbook playbook.yml -i inventory.yml
+```
+
+The run takes a few minutes (it installs k3s and all add-ons). When it finishes, a kubeconfig is written to your current directory as `./kubeconfig-<your-host>.yaml`.
+
+**Step 3 — talk to your cluster:**
+```bash
+export KUBECONFIG=./kubeconfig-1.2.3.4.yaml
+kubectl get nodes          # should show your node as "Ready"
+```
+
+That's a full cluster. Next, [expose an app](#exposing-an-app-with-dns--tls).
+
+> **Tip:** re-running the playbook is safe — the role is idempotent, so you can run it again any time to apply changes or recover from a half-finished run.
 
 ---
 ### Exposing an app with DNS + TLS
