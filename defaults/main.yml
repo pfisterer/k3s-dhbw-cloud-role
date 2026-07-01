@@ -95,6 +95,75 @@ kubeconfig_root: /etc/rancher/k3s/k3s.yaml
 kubeconfig_path: ""
 
 # -----------------------------------------------------------------------------
+## ♻️ Add-on: Automated k3s upgrades (system-upgrade-controller)
+# -----------------------------------------------------------------------------
+# Keep the cluster's k3s version current automatically by deploying Rancher's
+# system-upgrade-controller plus two upgrade Plans (one for server, one for agent
+# nodes). The controller cordons each node in turn, swaps the k3s binary via a
+# privileged job and restarts the service — a controlled rolling upgrade instead
+# of "all nodes at once". Server nodes are always upgraded before agents (the
+# agent Plan's prepare step waits for the server Plan to finish).
+#
+# ON by default so clusters stay current on their own. This means the cluster may
+# change its k3s version by itself (channel mode, see below) and every node is
+# briefly cordoned during an upgrade. By default upgrades only run inside the
+# nightly maintenance window (see k3s_auto_upgrade_window_* below), so on a single
+# node the unavoidable short downtime happens at 02:00, not mid-day. Set to false
+# to opt out entirely (e.g. to pin the version manually in a maintenance window).
+# Only deployed on the server node. See https://docs.k3s.io/upgrades/automated.
+k3s_auto_upgrade_enabled: true
+
+# Which k3s release the Plans track. Two mutually exclusive modes:
+#   channel → follow a release channel (auto-detects new releases; "always
+#             current"). The channel name is turned into
+#             https://update.k3s.io/v1-release/channels/<channel>.
+#   version → pin one exact release (reproducible; you bump it deliberately in
+#             Git and the controller rolls it out). Set k3s_auto_upgrade_version
+#             to e.g. "v1.31.5+k3s1"; when non-empty it overrides the channel.
+# IMPORTANT: never skip an intermediate minor version when pinning — k3s follows
+# the Kubernetes version-skew policy and rejects such jumps (and downgrades).
+k3s_auto_upgrade_channel: "stable"
+k3s_auto_upgrade_version: ""
+
+# Drain (evict pods) instead of only cordoning agent nodes before upgrading them.
+# true  → agent Plan drains (force, so DaemonSet/standalone pods don't block it),
+#         giving the cleanest in-place upgrade at the cost of pod reschedules.
+# false → agent Plan only cordons (workloads keep running through the restart).
+# Server nodes are always cordon-only: draining a control-plane node would evict
+# the upgrade controller itself and, on a single node, deadlock the upgrade.
+k3s_auto_upgrade_drain: true
+
+# Maintenance window: only start upgrade jobs inside this time range. Strongly
+# recommended when downtime is unavoidable (e.g. a single node, where every
+# upgrade briefly takes the cluster down) so it happens at night, not mid-day.
+# The controller only *starts* jobs within the window; keep it long enough for an
+# upgrade to begin. Set k3s_auto_upgrade_window_enabled to false to upgrade as
+# soon as a new release is detected, at any time.
+k3s_auto_upgrade_window_enabled: true
+# Full lowercase weekday names; default is every day so a release is never held
+# back more than 24h. Trim to e.g. weekends only to widen the gap between upgrades.
+k3s_auto_upgrade_window_days:
+  - sunday
+  - monday
+  - tuesday
+  - wednesday
+  - thursday
+  - friday
+  - saturday
+# 24h "HH:MM" strings, interpreted in the timezone below (not UTC).
+k3s_auto_upgrade_window_start: "02:00"
+k3s_auto_upgrade_window_end: "04:00"
+k3s_auto_upgrade_window_timezone: "Europe/Berlin"
+
+# Namespace the controller and its Plans live in (the upstream manifest creates
+# it and the matching "system-upgrade" ServiceAccount the Plans reference).
+system_upgrade_namespace: system-upgrade
+
+# system-upgrade-controller release to install. "latest" tracks the newest GitHub
+# release; pin a tag (e.g. "v0.16.0") for reproducible installs.
+system_upgrade_controller_version: "latest"
+
+# -----------------------------------------------------------------------------
 ## 🧰 Bootstrap: client / developer tooling
 # -----------------------------------------------------------------------------
 # Install Helm, kubectl, Skaffold and the shell aliases/completions. These are

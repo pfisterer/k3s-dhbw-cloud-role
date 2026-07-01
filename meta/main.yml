@@ -1,5 +1,7 @@
 ---
 galaxy_info:
+  role_name: k3s_dhbw_cloud
+  namespace: dhbw
   author: Dennis Pfisterer, https://dennis-pfisterer.de
   description: Installs and configures a K3s cluster, optimized for specific
     dhbw.cloud infrastructure requirements.
@@ -29,6 +31,6 @@ galaxy_info:
     - cluster
     - deployment
     - cloud
-    - DHBW
+    - dhbw
 
 dependencies: []

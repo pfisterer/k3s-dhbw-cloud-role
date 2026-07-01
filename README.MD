@@ -7,7 +7,7 @@ The point of the role is that the fiddly parts — **DNS** and **TLS** — are h
 - **A public DNS name** — for any Ingress with a hostname under your zone, [ExternalDNS](https://kubernetes-sigs.github.io/external-dns/) creates the DNS record for you.
 - **Valid HTTPS** — [cert-manager](https://cert-manager.io) obtains and auto-renews a TLS certificate (one wildcard `*.<your-zone>` by default), so your app is reachable over HTTPS with no per-app setup.
 
-You also get a full k3s cluster (one server, optional worker nodes), the built-in **Traefik** ingress, IPv4 / IPv6 / dual-stack support, and optional replicated storage ([Longhorn](https://longhorn.io)).
+You also get a full k3s cluster (one server, optional worker nodes), the built-in **Traefik** ingress, IPv4 / IPv6 / dual-stack support, optional replicated storage ([Longhorn](https://longhorn.io)), and **automatic k3s upgrades** that keep the cluster current (rolling, in a nightly window — on by default, see [Automated upgrades](#automated-upgrades)).
 
 To use it you only need to supply: the **host(s)** to install on, and — for certificates and DNS — an **email** and a **DNS zone**.
 
@@ -272,6 +272,28 @@ longhorn_default_storage_class: true   # make Longhorn the default StorageClass
 
 ---
 
+## Automated upgrades
+
+The role keeps the cluster's k3s version current on its own. By default it deploys Rancher's [system-upgrade-controller](https://docs.k3s.io/upgrades/automated) plus two upgrade **Plans** (one for server, one for agent nodes). The controller cordons each node in turn, swaps the k3s binary via a privileged job and restarts the service — a controlled rolling upgrade instead of "all nodes at once". Server nodes are always upgraded before agents (the agent Plan waits for the server Plan to finish).
+
+It is **enabled by default** (following the `stable` channel, inside the nightly maintenance window) and only deployed on the server node. Tune or disable it:
+
+```yaml
+k3s_auto_upgrade_enabled: true       # default; set false to opt out entirely
+k3s_auto_upgrade_channel: "stable"   # follow a channel → auto-detects new releases ("always current")
+# k3s_auto_upgrade_version: "v1.31.5+k3s1"  # …or pin one exact release (overrides the channel); bump it in Git
+k3s_auto_upgrade_drain: true         # drain (evict pods) agent nodes before upgrading; false = cordon only
+k3s_auto_upgrade_window_start: "02:00"  # only upgrade at night (see maintenance window below)
+```
+
+**Maintenance window.** By default upgrades only start inside a nightly window (`02:00`–`04:00` `Europe/Berlin`, every day) — the controller holds jobs until the window opens. This is the recommended setting when downtime is unavoidable (single node): the cluster reboots at 2 a.m., not mid-lecture. Widen or move it via `k3s_auto_upgrade_window_*`, or set `k3s_auto_upgrade_window_enabled: false` to upgrade as soon as a new release is detected, at any time.
+
+**Channel vs. version.** `channel` mode follows a k3s release channel and upgrades automatically whenever a new release appears — the true "always up to date" behaviour, at the cost of unannounced version bumps. `version` mode pins one exact release you bump deliberately (reproducible; review each jump). A pinned `k3s_auto_upgrade_version` always overrides the channel. Never skip an intermediate minor version when pinning — k3s follows the Kubernetes version-skew policy and rejects such jumps (and downgrades).
+
+> **Single node:** the upgrade cordons the one node, drains it (system pods restart) and swaps the binary in place, so there is a **short cluster downtime** during each upgrade — there is no second node to evacuate to. This is usually fine for a lab, but enable it as a conscious choice. On multi-node clusters workloads reschedule to the other nodes and only one node is unavailable at a time (`concurrency: 1`).
+
+---
+
 ## Variables
 
 All variables are defined in `defaults/main.yml` and can be overridden per host or group.
@@ -319,6 +341,24 @@ Before installing k3s, the role checks that the flannel overlay port is reachabl
 | `longhorn_replica_count`                        | `1`               | Default replicas per volume. Must be `<=` the number of nodes (asserted). `1` suits teaching/labs; raise to `3` (≥3 nodes) for production redundancy.                                                                                                                                                                                                                                                                                             |
 | `longhorn_default_storage_class`                | `true`            | Make Longhorn the default StorageClass. When `true`, k3s' built-in `local-path` storage is disabled (`--disable=local-storage`) so Longhorn is the only default.                                                                                                                                                                                                                                                                                  |
 | `longhorn_storage_over_provisioning_percentage` | `300`             | How much storage Longhorn may reserve across all volumes, as a percentage of each node's disk. Longhorn reserves by requested PVC size, not bytes written, and volumes are thin-provisioned, so the total can safely exceed the physical disk. The chart default (`100`) is tight on the small lab VMs and makes storage-hungry workloads (e.g. the Apache Ozone lab) fail to schedule replicas. The default `300` gives generous headroom; lower it (e.g. `100`) to be conservative on nodes with larger disks. |
+
+### Automated upgrades (system-upgrade-controller)
+
+Deployed on the **server node only**, and only when `k3s_auto_upgrade_enabled` is `true` (the default). See [Automated upgrades](#automated-upgrades) above.
+
+| Variable                            | Default          | Description                                                                                                                                    |
+| ----------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `k3s_auto_upgrade_enabled`          | `true`           | Deploy the system-upgrade-controller + server/agent upgrade Plans to keep k3s current. **On by default** (follows `stable`, nightly window); means self-driven version changes and brief node cordoning per upgrade. Set `false` to opt out. |
+| `k3s_auto_upgrade_channel`          | `stable`         | Release channel the Plans follow (turned into `https://update.k3s.io/v1-release/channels/<channel>`). Auto-detects new releases.              |
+| `k3s_auto_upgrade_version`          | `""`             | Pin one exact release (e.g. `v1.31.5+k3s1`). Non-empty overrides the channel. Never skip an intermediate minor version.                       |
+| `k3s_auto_upgrade_drain`            | `true`           | Drain (force-evict pods) agent nodes before upgrading; `false` = cordon only. Server nodes are always cordon-only.                            |
+| `k3s_auto_upgrade_window_enabled`   | `true`           | Only start upgrade jobs inside the maintenance window below. `false` = upgrade whenever a new release is detected. Recommended `true` when downtime is unavoidable (single node). |
+| `k3s_auto_upgrade_window_days`      | _(all 7 days)_   | Lowercase weekday names the window is active on. Trim (e.g. weekends only) to space out upgrades.                                             |
+| `k3s_auto_upgrade_window_start`     | `02:00`          | Window start, `HH:MM` in `k3s_auto_upgrade_window_timezone`.                                                                                  |
+| `k3s_auto_upgrade_window_end`       | `04:00`          | Window end, `HH:MM`. Keep it long enough for an upgrade to start.                                                                             |
+| `k3s_auto_upgrade_window_timezone`  | `Europe/Berlin`  | IANA timezone the window times are interpreted in.                                                                                            |
+| `system_upgrade_namespace`          | `system-upgrade` | Namespace the controller and Plans live in.                                                                                                   |
+| `system_upgrade_controller_version` | `latest`         | system-upgrade-controller release to install. `latest` tracks the newest GitHub release; pin a tag (e.g. `v0.16.0`) for reproducibility.       |
 
 ### Bootstrap / client tooling
 
@@ -391,6 +431,9 @@ kubectl get nodes
 This role uses calendar versioning (`YYYY.MM.DD`).
 
 ### 2026.07.01
+
+**Added**
+- **Automatic k3s upgrades via Rancher's [system-upgrade-controller](https://docs.k3s.io/upgrades/automated) — on by default (`k3s_auto_upgrade_enabled`).** The server node deploys the controller plus two upgrade Plans (server + agent); the controller cordons each node in turn, swaps the k3s binary and restarts the service — a controlled rolling upgrade, servers before agents (`concurrency: 1`). Track a release channel (`k3s_auto_upgrade_channel`, default `stable` → auto-detects new releases) or pin one exact release (`k3s_auto_upgrade_version`, overrides the channel). Agent nodes drain by default (`k3s_auto_upgrade_drain`); servers are always cordon-only. Upgrades run only inside a nightly maintenance window (`k3s_auto_upgrade_window_*`, default `02:00`–`04:00` `Europe/Berlin`) so the unavoidable brief downtime on a single node lands at night; disable the window (`k3s_auto_upgrade_window_enabled: false`) to upgrade immediately. Set `k3s_auto_upgrade_enabled: false` to opt out. Verified end-to-end on a 3-node cluster (v1.35.6 → v1.36.2).
 
 **Fixed**
 - **`kubernetes` Python client is now installed via pip (`>=24.2.0`) instead of apt.** The `python3-kubernetes` apt package on Ubuntu is capped at ~22.x, which made the `kubernetes.core` collection warn `kubernetes<24.2.0 is not supported or tested`. The server node now installs a current client with pip (using the module's `break_system_packages` for PEP 668), so the warning is gone and the client stays on a supported version.

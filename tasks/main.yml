@@ -38,3 +38,8 @@
   ansible.builtin.include_tasks: 08_addons_longhorn.yml
   tags: [longhorn, storage]
   when: k3s_role == 'server' and longhorn_enabled | bool
+
+- name: Include automated k3s upgrade addon tasks
+  ansible.builtin.include_tasks: 09_addons_system_upgrade.yml
+  tags: [upgrade, autoupgrade]
+  when: k3s_role == 'server' and k3s_auto_upgrade_enabled | bool
