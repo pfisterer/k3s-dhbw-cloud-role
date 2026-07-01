@@ -21,13 +21,27 @@
     - k3s_role == 'server'
     - bootstrap_install_client_tools | bool
   block:
-    - name: Ensure python3-kubernetes is installed (for Ansible k8s/helm modules)
+    # The kubernetes.core collection (helm/k8s modules) checks the Python
+    # `kubernetes` client version at load time and warns when it is older than
+    # 24.2.0. Ubuntu's python3-kubernetes apt package is capped at ~22.x, which
+    # trips that warning, so we install a current release with pip instead of apt.
+    # pip is required for that, and Ubuntu 24.04 marks the system Python as
+    # externally managed (PEP 668) — hence break_system_packages. This is a
+    # dedicated single-purpose cluster host, so writing into the system Python
+    # is acceptable and keeps the client on a supported version.
+    - name: Ensure pip is available (for the kubernetes client below)
       ansible.builtin.apt:
         name:
-          - python3-kubernetes
+          - python3-pip
         state: present
         update_cache: true
         cache_valid_time: 86400
+
+    - name: Ensure a supported Python kubernetes client is installed (for Ansible k8s/helm modules)
+      ansible.builtin.pip:
+        name: "kubernetes>=24.2.0"
+        state: present
+        break_system_packages: true
 
     - name: Ensure Helm is installed
       ansible.builtin.shell: |

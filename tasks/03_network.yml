@@ -5,29 +5,57 @@
 # (ordered families, node IPs, CIDRs, TLS SANs, external IP and k3s exec args).
 # ─────────────────────────────────────────────────────────────────────────────
 
-- name: Determine ordered IP families and base addresses
+- name: Determine base node addresses
   ansible.builtin.set_fact:
-    # First entry = primary family (k3s uses it as the cluster's primary stack).
-    _ip_families_ordered: >-
-      {{ ['ipv4'] if ip_family == 'ipv4'
-         else (['ipv6'] if ip_family == 'ipv6'
-         else (['ipv4', 'ipv6'] if ip_family_primary == 'ipv4'
-         else ['ipv6', 'ipv4'])) }}
     _node_ipv4: "{{ ansible_facts.default_ipv4.address | default('') }}"
     _node_ipv6: "{{ ansible_facts.default_ipv6.address | default('') }}"
     # Address Ansible connects through — the externally reachable one.
     _reachable_host: "{{ ansible_host | default(inventory_hostname) }}"
 
+- name: Resolve IP family (auto-detect when set to 'auto')
+  ansible.builtin.set_fact:
+    # 'auto' → derive from the interface default-route addresses:
+    # both present → dual, only IPv6 → ipv6, otherwise ipv4. A private/NATed
+    # address still counts as "family present"; set ip_family explicitly to
+    # exclude it. Any explicit value is passed through unchanged.
+    _ip_family: >-
+      {{ ip_family if ip_family != 'auto'
+         else ('dual' if (_node_ipv4 | length > 0 and _node_ipv6 | length > 0)
+               else ('ipv6' if _node_ipv6 | length > 0 else 'ipv4')) }}
+    # 'auto' primary → the family we connect over (IPv6 literal → ipv6).
+    _ip_family_primary: >-
+      {{ ip_family_primary if ip_family_primary != 'auto'
+         else ('ipv6' if ':' in _reachable_host else 'ipv4') }}
+
+- name: Determine ordered IP families
+  ansible.builtin.set_fact:
+    # First entry = primary family (k3s uses it as the cluster's primary stack).
+    _ip_families_ordered: >-
+      {{ ['ipv4'] if _ip_family == 'ipv4'
+         else (['ipv6'] if _ip_family == 'ipv6'
+         else (['ipv4', 'ipv6'] if _ip_family_primary == 'ipv4'
+         else ['ipv6', 'ipv4'])) }}
+
+- name: Show resolved IP family
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: ip_family={{ ip_family }}{{
+        ' → ' + _ip_family if ip_family == 'auto' else '' }}, primary={{
+        _ip_family_primary }} (default_ipv4='{{ _node_ipv4 }}',
+      default_ipv6='{{ _node_ipv6 }}')
+
 - name: Validate IP family configuration
   ansible.builtin.assert:
     that:
-      - ip_family in ['ipv4', 'ipv6', 'dual']
-      - "ip_family != 'dual' or ip_family_primary in ['ipv4', 'ipv6']"
+      - ip_family in ['auto', 'ipv4', 'ipv6', 'dual']
+      - ip_family_primary in ['auto', 'ipv4', 'ipv6']
+      - "_ip_family != 'dual' or _ip_family_primary in ['ipv4', 'ipv6']"
       - "'ipv4' not in _ip_families_ordered or _node_ipv4 | length > 0"
       - "'ipv6' not in _ip_families_ordered or _node_ipv6 | length > 0"
     fail_msg: >-
       Invalid IP configuration on {{ inventory_hostname }}
-      (ip_family={{ ip_family }}, ip_family_primary={{ ip_family_primary }}).
+      (ip_family={{ ip_family }} → {{ _ip_family }},
+      primary={{ _ip_family_primary }}).
       A required interface address fact is missing
       (default_ipv4='{{ _node_ipv4 }}', default_ipv6='{{ _node_ipv6 }}').
       These facts come from the *default route* of each family, so dual-stack
@@ -37,7 +65,7 @@
       on that interface, or set k3s_node_external_ip explicitly.
     success_msg: >-
       {{ inventory_hostname }}: IP family configuration OK
-      (ip_family={{ ip_family }}, default_ipv4='{{ _node_ipv4 }}',
+      (ip_family={{ _ip_family }}, default_ipv4='{{ _node_ipv4 }}',
       default_ipv6='{{ _node_ipv6 }}').
 
 - name: Compute derived network settings

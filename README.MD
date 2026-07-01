@@ -99,7 +99,6 @@ all:
   hosts:
     "1.2.3.4":
       ansible_user: ubuntu
-      ip_family: ipv4
       cert_manager_email: your@mail.com
 
       # DNS + automatic (wildcard) TLS — set these to enable ExternalDNS and DNS-01.
@@ -193,7 +192,6 @@ all:
           hosts:
             "141.72.5.244":
               ansible_user: root
-              ip_family: ipv4
               cert_manager_email: your@mail.com
               # ... all other role variables ...
 
@@ -231,38 +229,24 @@ ansible-playbook playbook.yml -i inventory.yml --limit production
 
 ### IPv6 and dual-stack
 
-The role works in IPv4-only, IPv6-only and dual-stack environments. The stack is
-selected with `ip_family`; in dual-stack `ip_family_primary` decides which family
-is preferred (listed first in the cluster/service CIDRs and `--node-ip`, and used
-for the externally advertised address). The externally reachable IP is taken
-automatically from the address Ansible connects through — no manual configuration
-needed in the common case.
+The role works in IPv4-only, IPv6-only and dual-stack environments. **By default you don't configure this at all** — `ip_family` defaults to `auto`, which detects the stack from the host's addresses:
 
-**Dual-stack, IPv4 primary** (IPv6 as an add-on):
-```yaml
-"141.72.5.244":
-  ansible_user: root
-  ip_family: dual
-  ip_family_primary: ipv4
-  cert_manager_email: your@mail.com
-```
+- both IPv4 and IPv6 present → **dual-stack** (the family you connect over becomes primary)
+- only IPv6 → **IPv6-only**
+- otherwise → **IPv4-only**
 
-**Dual-stack, IPv6 primary** (e.g. only private/NATed IPv4, public IPv6):
+The externally reachable IP is likewise taken from the address Ansible connects through, so the common cases need no network settings.
+
+**When to override it:** auto-detection sees *any* address of a family, including a private/NATed one. So on a host with public IPv6 and only a private IPv4 that you want to keep out of the cluster, set the family explicitly:
+
 ```yaml
 "2001:db8::1":          # connect over the public IPv6 address
   ansible_user: root
-  ip_family: dual
-  ip_family_primary: ipv6
+  ip_family: ipv6       # force IPv6-only; ignore the private IPv4
   cert_manager_email: your@mail.com
 ```
 
-**IPv6-only:**
-```yaml
-"2001:db8::1":
-  ansible_user: root
-  ip_family: ipv6
-  cert_manager_email: your@mail.com
-```
+The debug line `ip_family=auto → dual, primary=ipv4 ...` printed during the run shows what was detected — check it if the result is not what you expected. Valid values are `auto` (default), `ipv4`, `ipv6` and `dual`; for `dual`, `ip_family_primary` (`auto`/`ipv4`/`ipv6`) picks the primary family listed first in the CIDRs and `--node-ip`.
 
 Notes:
 - The DNS-01 challenge is the default (`cert_manager_preferred_challenge: dns01`, requires the RFC2136 variables) — it works in IPv6-only / NAT setups where the ACME server cannot otherwise reach the ingress over the chosen family, and it is the only challenge that can issue the wildcard certificate. It falls back to HTTP-01 when the RFC2136 variables are unset.
@@ -303,8 +287,8 @@ All variables are defined in `defaults/main.yml` and can be overridden per host 
 
 | Variable                | Default                     | Description                                                                                                                                                                                              |
 | ----------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ip_family`             | `ipv4`                      | IP stack to configure: `ipv4` (single-stack), `ipv6` (single-stack) or `dual` (dual-stack). Drives TLS SANs, kubeconfig URL, `--node-ip` and the pod/service CIDRs.                                      |
-| `ip_family_primary`     | `ipv4`                      | Only used when `ip_family: dual` — which family is **primary** (listed first in the CIDRs / `--node-ip`). Use `ipv4` when IPv6 is just an add-on, `ipv6` when e.g. only private/NATed IPv4 is available. |
+| `ip_family`             | `auto`                      | IP stack to configure: `auto` detects it from the host's default-route addresses (both → `dual`, only IPv6 → `ipv6`, else `ipv4`); or force `ipv4` / `ipv6` / `dual`. A private/NATed address still counts as "family present", so set it explicitly to exclude one. Drives TLS SANs, kubeconfig URL, `--node-ip` and the pod/service CIDRs. |
+| `ip_family_primary`     | `auto`                      | Only used when `ip_family` resolves to `dual` — which family is **primary** (listed first in the CIDRs / `--node-ip`). `auto` uses the family Ansible connects over; or force `ipv4` (IPv6 as an add-on) / `ipv6` (e.g. only private/NATed IPv4 available). |
 | `k3s_cluster_cidr_ipv4` | `10.42.0.0/16`              | IPv4 pod CIDR (k3s default).                                                                                                                                                                             |
 | `k3s_service_cidr_ipv4` | `10.43.0.0/16`              | IPv4 service CIDR (k3s default).                                                                                                                                                                         |
 | `k3s_cluster_cidr_ipv6` | `fd00:42::/56`              | IPv6 pod CIDR (ULA). Only applied when IPv6 is involved.                                                                                                                                                 |
@@ -405,6 +389,18 @@ kubectl get nodes
 ## Changelog
 
 This role uses calendar versioning (`YYYY.MM.DD`).
+
+### 2026.07.01
+
+**Fixed**
+- **`kubernetes` Python client is now installed via pip (`>=24.2.0`) instead of apt.** The `python3-kubernetes` apt package on Ubuntu is capped at ~22.x, which made the `kubernetes.core` collection warn `kubernetes<24.2.0 is not supported or tested`. The server node now installs a current client with pip (using the module's `break_system_packages` for PEP 668), so the warning is gone and the client stays on a supported version.
+
+**Changed**
+- **`ip_family` now defaults to `auto` and is detected from the host** (was hardcoded `ipv4`). Auto-detection reads the interface default-route addresses: both families present → `dual`, only IPv6 → `ipv6`, otherwise `ipv4`; `ip_family_primary` also defaults to `auto` (the family Ansible connects over). A resolved-family `debug` line is printed during the run. Explicit `ipv4`/`ipv6`/`dual` values keep working unchanged.
+  - **Mildly breaking:** a host that omitted `ip_family` and happens to have an IPv6 default route in addition to IPv4 is now configured as **dual-stack** instead of IPv4-only. Auto-detection also counts a **private/NATed** address as "family present" — set `ip_family` explicitly to force a single family on such hosts. Pin `ip_family: ipv4` (and `ip_family_primary: ipv4`) to keep the previous behaviour exactly.
+
+**Documentation**
+- README reworked for first-time users: added a **TL;DR** and a **Before you start** (prerequisites + glossary) section, turned the single-node example into a step-by-step **Quickstart**, linked the official [k3s hardware requirements](https://docs.k3s.io/installation/requirements) instead of hardcoding values, and simplified the IPv6/dual-stack section around the new auto-detection.
 
 ### 2026.06.24
 

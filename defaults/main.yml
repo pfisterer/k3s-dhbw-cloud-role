@@ -2,19 +2,24 @@
 ## 🌟 General & Network Settings
 # -----------------------------------------------------------------------------
 # The IP stack to configure the cluster for:
-#   ipv4 → IPv4 single-stack (default, unchanged behaviour)
+#   auto → detect from the host's default-route addresses (default):
+#          both families present → dual, only IPv6 → ipv6, otherwise ipv4
+#   ipv4 → IPv4 single-stack
 #   ipv6 → IPv6 single-stack
 #   dual → dual-stack (both families)
 # Determines which addresses are used for TLS SANs, the kubeconfig URL, k3s
-# --node-ip and the pod/service CIDRs.
-ip_family: "ipv4"
+# --node-ip and the pod/service CIDRs. Set an explicit value to override the
+# auto-detection (e.g. force ipv6 on a host that also has a private IPv4).
+ip_family: "auto"
 
-# Only relevant when ip_family == "dual": which family is the *primary* one.
+# Only relevant when ip_family resolves to "dual": which family is the *primary*.
 # The primary family is listed first in --cluster-cidr/--service-cidr/--node-ip
 # (k3s uses the first entry as the cluster's primary family).
+#   auto → the family Ansible connects over (default): IPv6 literal in the
+#          connection address → ipv6 primary, otherwise ipv4 primary
 #   ipv4 → IPv4 primary, IPv6 secondary ("IPv6 as an add-on")
 #   ipv6 → IPv6 primary, IPv4 secondary (e.g. only private/NATed IPv4 available)
-ip_family_primary: "ipv4"
+ip_family_primary: "auto"
 
 # Pod (cluster) and service CIDRs per family.
 # The IPv4 values match the k3s defaults; the IPv6 values are ULA ranges.
