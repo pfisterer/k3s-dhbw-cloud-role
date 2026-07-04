@@ -208,36 +208,37 @@
   changed_when: false
   failed_when: _nf_conntrack_modprobe.rc != 0
 
-- name: Tune kernel parameters for k3s
+# Manage the sysctls as ONE file + reload-on-change instead of the
+# ansible.posix.sysctl module: that module falsely reports "changed" every run
+# for net.netfilter.* keys (even when file+runtime value already match), which
+# broke idempotency. copy() only changes on real content diffs; the reload runs
+# only when the file changed and is changed_when:false so it never counts.
+- name: Deploy k3s kernel-tuning sysctls
   become: true
-  ansible.posix.sysctl:
-    name: "{{ item.name }}"
-    value: "{{ item.value }}"
-    sysctl_file: /etc/sysctl.d/99-k3s.conf
-    state: present
-    reload: true
-  loop:
-    - name: fs.inotify.max_user_instances
-      value: "8192"
-    - name: fs.inotify.max_user_watches
-      value: "524288"
-    - name: net.netfilter.nf_conntrack_max
-      value: "524288"
-    - name: net.netfilter.nf_conntrack_tcp_timeout_established
-      value: "86400"
-    - name: kernel.pid_max
-      value: "131072"
-    - name: fs.file-max
-      value: "2097152"
-    - name: vm.swappiness
-      value: "0"
-    - name: net.ipv4.ip_forward
-      value: "1"
-    - name: net.ipv6.conf.all.forwarding
-      value: "1"
-    - name: net.ipv6.conf.default.forwarding
-      value: "1"
-    - name: net.ipv4.ip_local_port_range
-      value: "1024 65535"
-    - name: vm.max_map_count
-      value: "262144"
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-k3s.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by k3s-dhbw-cloud-role — applied at boot and on change below.
+      fs.inotify.max_user_instances = 8192
+      fs.inotify.max_user_watches = 524288
+      net.netfilter.nf_conntrack_max = 524288
+      net.netfilter.nf_conntrack_tcp_timeout_established = 86400
+      kernel.pid_max = 131072
+      fs.file-max = 2097152
+      vm.swappiness = 0
+      net.ipv4.ip_forward = 1
+      net.ipv6.conf.all.forwarding = 1
+      net.ipv6.conf.default.forwarding = 1
+      net.ipv4.ip_local_port_range = 1024 65535
+      vm.max_map_count = 262144
+  register: _k3s_sysctl_file
+
+- name: Apply k3s sysctls when the file changed # noqa: no-handler
+  become: true
+  ansible.builtin.command:
+    cmd: sysctl --system
+  when: _k3s_sysctl_file is changed
+  changed_when: false

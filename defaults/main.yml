@@ -197,9 +197,30 @@ longhorn_version: ""
 
 # Default number of replicas per volume. Must be <= the number of nodes, otherwise
 # replicas stay unscheduled and volumes are "Degraded" (the role asserts this).
-# Default 1 works on any cluster size and is fine for teaching/labs; raise it to 3
-# (with >= 3 nodes) for production-grade redundancy against node failure.
+# 1 keeps disk usage at 1x (each extra replica is a full copy of the written data,
+# so 2 doubles and 3 triples the Longhorn footprint) -- the right default for the
+# small lab VMs. It does NOT block the automatic rolling k3s upgrades, because
+# longhorn_node_drain_policy below live-migrates the last replica off a node before
+# draining it. Raise to 2/3 (<= node count) only when you want redundancy against a
+# node *failure* (a crashed node loses its single-replica volumes until restored);
+# that is a storage-vs-resilience trade-off, independent of upgrades.
 longhorn_replica_count: 1
+
+# Automatically rebalance replicas across nodes when scheduling allows (e.g. after a
+# drained node rejoins). Only has an effect at replica counts >= 2. "least-effort"
+# spreads replicas without aggressive data movement; "best-effort" balances more
+# eagerly; "disabled" leaves placement as-is.
+longhorn_replica_auto_balance: least-effort
+
+# What Longhorn does when a node is drained (as the automatic k3s upgrades do). This
+# -- not a higher replica count -- is what keeps upgrades from hanging.
+# "block-for-eviction-if-contains-last-replica" makes Longhorn live-migrate the last
+# healthy replica off the node before allowing the drain, so a rolling upgrade never
+# hangs even for single-replica volumes and without a permanent second copy. The
+# Longhorn chart default ("block-if-contains-last-replica") instead blocks the drain
+# indefinitely (DeadlineExceeded -> node stuck cordoned). Set "always-allow" only if
+# you accept temporary volume unavailability during drains.
+longhorn_node_drain_policy: block-for-eviction-if-contains-last-replica
 
 # Make Longhorn the cluster's default StorageClass. When true, k3s' built-in
 # local-path storage is disabled (via --disable=local-storage on the server) so

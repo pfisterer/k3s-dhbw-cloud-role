@@ -54,6 +54,13 @@
             defaultClassReplicaCount: "{{ longhorn_replica_count | int }}"
           defaultSettings:
             defaultReplicaCount: "{{ longhorn_replica_count | int }}"
+            # Spread replicas across nodes so no single node ends up holding several
+            # "last replicas" (which would each block a drain during a rolling upgrade).
+            replicaAutoBalance: "{{ longhorn_replica_auto_balance }}"
+            # Live-migrate the last replica off a node before allowing it to be drained,
+            # so the role's automatic rolling k3s upgrades never hang on a single-replica
+            # volume (the chart default block-if-contains-last-replica blocks forever).
+            nodeDrainPolicy: "{{ longhorn_node_drain_policy }}"
             # Allow reserving more than the raw disk size (thin-provisioned volumes).
             # Needed so storage-hungry labs (e.g. Apache Ozone) can schedule their
             # replicas on the small lab VMs. See longhorn_storage_over_provisioning_percentage.
