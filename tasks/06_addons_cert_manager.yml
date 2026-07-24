@@ -4,6 +4,25 @@
   when: cert_manager_email is defined and cert_manager_email != ""
   become: true
   block:
+    # --- Fail fast on a malformed address. The block guard above only checks
+    # that cert_manager_email is non-empty; a non-empty but invalid value (e.g.
+    # a users.dhbw.site DNS name pasted in instead of a real address, which has
+    # no "@") would still render a ClusterIssuer whose ACME newAccount is
+    # rejected upstream with "400 invalidContact" — cert-manager then retries
+    # that account registration forever. Assert a basic mailbox shape here so
+    # provisioning fails loudly instead of shipping a broken, looping issuer.
+    - name: Validate cert_manager_email is a well-formed address
+      ansible.builtin.assert:
+        that:
+          - cert_manager_email | regex_search('^\S+@\S+\.\S+$')
+        fail_msg: >-
+          cert_manager_email '{{ cert_manager_email }}' is not a valid email
+          address (needs a mailbox@domain.tld form). cert-manager would create a
+          ClusterIssuer that loops on '400 invalidContact' against
+          {{ cert_manager_url }}. Set a real address, or leave it empty to skip
+          cert-manager entirely.
+        quiet: true
+
     # --- Namespace
     - name: Ensure cert-manager namespace exists
       kubernetes.core.k8s:
