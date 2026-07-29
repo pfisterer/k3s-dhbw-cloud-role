@@ -14,7 +14,13 @@
     - name: Validate cert_manager_email is a well-formed address
       ansible.builtin.assert:
         that:
-          - cert_manager_email | regex_search('^\S+@\S+\.\S+$')
+          # `is match` rather than `| regex_search`: the filter returns the
+          # matched string (or none), and since ansible-core 2.19 a conditional
+          # that resolves to a non-boolean is a hard error —
+          # "Conditional result (True) was derived from value of type 'str'".
+          # The `match` test anchors at the start like re.match, so the leading
+          # ^ is redundant but kept for readability.
+          - cert_manager_email is match('^\S+@\S+\.\S+$')
         fail_msg: >-
           cert_manager_email '{{ cert_manager_email }}' is not a valid email
           address (needs a mailbox@domain.tld form). cert-manager would create a
