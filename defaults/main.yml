@@ -314,7 +314,20 @@ traefik_namespace: kube-system
 # -----------------------------------------------------------------------------
 
 external_dns_namespace: external-dns
-external_dns_version: "v0.19.0"
+
+# ExternalDNS container image tag. Do not go below v0.21.0: up to and including
+# v0.20.0 a transient AXFR failure (e.g. a TCP/53 timeout towards the RFC2136
+# server) bubbled up as a hard error, so the controller called log.Fatalf and the
+# pod crash-looped. Since v0.21.0 the rfc2136 provider wraps it in a SoftError,
+# which the controller logs and retries on the next interval.
+external_dns_version: "v0.21.0"
+
+# ExternalDNS Helm chart version. Empty = latest from the chart repository; pin a
+# version for reproducible installs. Keep this in sync with the image tag above
+# (chart 1.21.1 ships appVersion 0.21.0) — an unpinned chart combined with a
+# pinned image silently drifts into untested combinations.
+external_dns_chart_version: "1.21.1"
+
 external_dns_log_level: "debug"
 
 # Registry (TXT record) ownership. external-dns uses TXT records to track the

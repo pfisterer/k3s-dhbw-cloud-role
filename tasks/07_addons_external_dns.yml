@@ -29,6 +29,7 @@
       kubernetes.core.helm:
         name: external-dns
         chart_ref: external-dns/external-dns
+        chart_version: "{{ external_dns_chart_version or omit }}"
         release_namespace: "{{ external_dns_namespace }}"
         kubeconfig: "{{ kubeconfig_root }}"
         state: present
