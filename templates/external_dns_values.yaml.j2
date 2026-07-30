@@ -16,8 +16,22 @@ image:
 # ------------------------------------------------------------------------------
 logLevel: "{{ external_dns_log_level }}"
 
+# Each reconciliation is a full AXFR of the zone; --events keeps record creation
+# fast so the interval can stay well above the chart default of 1m.
+interval: "{{ external_dns_interval }}"
+triggerLoopOnEvent: {{ external_dns_trigger_loop_on_event | bool | ternary('true', 'false') }}
+
 provider:
   name: rfc2136
+
+# Set via the chart's own key, NOT via extraArgs: the chart always renders
+# --source from this list, so passing --source in extraArgs only appends and the
+# chart default (service, ingress) stays active. That silently enabled
+# --source=service and passed --source=ingress twice. Driving it from here also
+# makes the chart generate the Traefik CRD RBAC itself.
+sources:
+  - ingress
+  - traefik-proxy
 
 policy: sync
 
@@ -29,8 +43,6 @@ txtPrefix: "{{ external_dns_txt_prefix }}"
 # CLI arguments corresponding to your deployment spec
 # ------------------------------------------------------------------------------
 extraArgs:
-  - --source=ingress
-  - --source=traefik-proxy
   - --managed-record-types=A
   - --managed-record-types=AAAA
   - --managed-record-types=CNAME
@@ -47,7 +59,11 @@ extraArgs:
   - --rfc2136-tsig-axfr
 
 # ------------------------------------------------------------------------------
-# RBAC — extra permissions for Traefik CRDs (required by --source=traefik-proxy)
+# RBAC — extra permissions for Traefik CRDs (required by --source=traefik-proxy).
+# The chart already derives these from `sources` above, so this block is now a
+# duplicate. Kept deliberately: if a chart version ever stops generating them the
+# traefik-proxy source fails silently (IngressRoutes simply stop being picked up),
+# and an extra ClusterRole rule costs nothing.
 # ------------------------------------------------------------------------------
 rbac:
   additionalPermissions:

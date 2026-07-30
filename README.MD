@@ -409,6 +409,8 @@ These tools (Helm, kubectl, Skaffold, shell aliases and completions) are install
 | `external_dns_exclude_target_nets` | _(RFC1918/CGNAT/ULA/link-local)_ | CIDRs ExternalDNS must never publish (e.g. private/NAT addresses on a dual-stack node).                                             |
 | `external_dns_version`             | `v0.21.0`                        | ExternalDNS container image tag. Keep at `v0.21.0` or newer: older versions crash-loop on transient AXFR failures.                  |
 | `external_dns_chart_version`       | `1.21.1`                         | ExternalDNS Helm chart version. Empty = latest; keep in sync with the image tag above.                                               |
+| `external_dns_interval`            | `5m`                             | Reconciliation interval. Each run is a full AXFR of the zone, so raising this reduces load on the shared RFC2136 server.             |
+| `external_dns_trigger_loop_on_event` | `true`                         | Reconcile on Ingress/IngressRoute events (`--events`), so a longer interval does not delay new records.                              |
 
 ---
 

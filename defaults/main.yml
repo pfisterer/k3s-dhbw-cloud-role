@@ -330,6 +330,20 @@ external_dns_chart_version: "1.21.1"
 
 external_dns_log_level: "debug"
 
+# Reconciliation interval. Every run pulls a FULL TSIG AXFR of the zone, so with
+# many clusters publishing into one shared zone this is the dominant load on the
+# RFC2136 server — the chart default of 1m means one zone transfer per cluster per
+# minute. 5m cuts that fivefold without making record creation slower, because
+# external_dns_trigger_loop_on_event reacts to source changes immediately; the
+# interval is then only the safety net against missed events and drift.
+external_dns_interval: "5m"
+
+# Reconcile on source events (--events) instead of only on the interval. Both
+# sources in use support it (the ingress and traefik-proxy sources register
+# informer event handlers), so a new Ingress or IngressRoute still gets its DNS
+# record within seconds despite the longer interval above.
+external_dns_trigger_loop_on_event: true
+
 # Registry (TXT record) ownership. external-dns uses TXT records to track the
 # records it manages. Make the owner ID unique per cluster when several clusters
 # publish into the same zone, otherwise they fight over each other's records.
