@@ -212,6 +212,14 @@ longhorn_replica_count: 1
 # eagerly; "disabled" leaves placement as-is.
 longhorn_replica_auto_balance: least-effort
 
+# Where Longhorn tries to place a replica relative to the workload using the volume.
+# "best-effort" keeps one replica on the node the volume is attached to, so normal
+# reads and writes stay local instead of crossing the pod network on every I/O --
+# what the Longhorn best practices recommend as the default. "disabled" (the chart
+# default) makes no such attempt; "strict-local" forces exactly one replica, pinned
+# to the workload's node, and is only for applications that replicate themselves.
+longhorn_data_locality: best-effort
+
 # What Longhorn does when a node is drained (as the automatic k3s upgrades do). This
 # -- not a higher replica count -- is what keeps upgrades from hanging.
 # "block-for-eviction-if-contains-last-replica" makes Longhorn live-migrate the last
@@ -238,6 +246,21 @@ longhorn_default_storage_class: true
 # 25%-minimal-available guard still prevents a disk from actually filling up.
 # Lower it (e.g. 100) to be conservative on nodes with larger disks.
 longhorn_storage_over_provisioning_percentage: 300
+
+# Which orphaned resources Longhorn cleans up on its own, as a semicolon-separated
+# list: "replica-data" (replica directories no longer tracked by any volume) and
+# "instance" (engine/replica runtime instances left behind when an instance-manager
+# dies). Those stale instances are what makes a later attach fail with "connection
+# refused" against an instance-manager address that no longer exists. Empty (the
+# chart default) means orphans accumulate until deleted by hand. Note that the Helm
+# key for this changed name between chart versions and an unknown key under
+# defaultSettings is silently ignored -- another reason to pin longhorn_version.
+longhorn_orphan_resource_auto_deletion: "replica-data;instance"
+
+# Seconds Longhorn waits before deleting an orphaned resource, giving a node that is
+# merely rebooting time to come back and reclaim its replicas. 300 is the Longhorn
+# default and is kept explicit here because it is the safety margin on the setting above.
+longhorn_orphan_resource_auto_deletion_grace_period: 300
 
 # -----------------------------------------------------------------------------
 ## 📦 Helm Repository Management

@@ -184,6 +184,50 @@
         enabled: true
         state: started
 
+    # Ubuntu's ubuntu-server metapackage pulls in multipath-tools, so multipathd runs
+    # on every node whether or not there is multipath hardware. It claims the /dev/sd*
+    # devices Longhorn attaches over iSCSI, and when it wins that race the volume fails
+    # to mount ("MountVolume.SetUp failed for volume"). Blacklisting those devnodes is
+    # Longhorn's documented fix: https://longhorn.io/kb/troubleshooting-volume-with-multipath/
+    # Safe on cloud VMs whose root disk is virtio (/dev/vda): sd* is then exclusively
+    # Longhorn's iSCSI attachments. Review this on nodes with real SCSI/SAS disks.
+    - name: Gather service facts (to detect multipathd)
+      ansible.builtin.service_facts:
+
+    # multipathd's default config_dir. Present in multipath.conf(5) but not created by
+    # the Ubuntu package, so create it rather than editing the distro's multipath.conf.
+    - name: Ensure the multipathd drop-in directory exists
+      ansible.builtin.file:
+        path: /etc/multipath/conf.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      when: "'multipathd.service' in (ansible_facts.services | default({}))"
+
+    - name: Keep multipathd away from Longhorn's iSCSI devices
+      ansible.builtin.copy:
+        dest: /etc/multipath/conf.d/longhorn.conf
+        content: |
+          # Managed by k3s-dhbw-cloud-role -- do not edit.
+          blacklist {
+              devnode "^sd[a-z0-9]+"
+          }
+        owner: root
+        group: root
+        mode: "0644"
+      register: _longhorn_multipath_blacklist
+      when: "'multipathd.service' in (ansible_facts.services | default({}))"
+
+    # Deliberately not a handler: handlers flush at the end of the play, i.e. after
+    # 08_addons_longhorn.yml has already installed Longhorn in the same run. The
+    # blacklist has to be live before the first volume is attached.
+    - name: Restart multipathd to apply the blacklist # noqa: no-handler
+      ansible.builtin.systemd:
+        name: multipathd
+        state: restarted
+      when: _longhorn_multipath_blacklist is changed
+
 # -----------------------------------------
 # Kernel tuning for k3s
 # -----------------------------------------

@@ -52,8 +52,16 @@
           persistence:
             defaultClass: "{{ longhorn_default_storage_class | bool }}"
             defaultClassReplicaCount: "{{ longhorn_replica_count | int }}"
+            # dataLocality parameter of the "longhorn" StorageClass, i.e. what every
+            # PVC created through it gets. StorageClass parameters are immutable, but
+            # Longhorn ships the class in the longhorn-storageclass ConfigMap and
+            # re-applies it itself, so changing this does propagate on a helm upgrade
+            # -- to NEW volumes only. Existing volumes keep the locality in their spec.
+            defaultDataLocality: "{{ longhorn_data_locality }}"
           defaultSettings:
             defaultReplicaCount: "{{ longhorn_replica_count | int }}"
+            # Same locality default for volumes created outside the StorageClass.
+            defaultDataLocality: "{{ longhorn_data_locality }}"
             # Spread replicas across nodes so no single node ends up holding several
             # "last replicas" (which would each block a drain during a rolling upgrade).
             replicaAutoBalance: "{{ longhorn_replica_auto_balance }}"
@@ -65,6 +73,11 @@
             # Needed so storage-hungry labs (e.g. Apache Ozone) can schedule their
             # replicas on the small lab VMs. See longhorn_storage_over_provisioning_percentage.
             storageOverProvisioningPercentage: "{{ longhorn_storage_over_provisioning_percentage | int }}"
+            # Let Longhorn garbage-collect orphaned replica data and engine/replica
+            # instances instead of leaving them for manual cleanup. See the two
+            # longhorn_orphan_resource_auto_deletion* variables for the caveats.
+            orphanResourceAutoDeletion: "{{ longhorn_orphan_resource_auto_deletion }}"
+            orphanResourceAutoDeletionGracePeriod: "{{ longhorn_orphan_resource_auto_deletion_grace_period | int }}"
         wait: true
         # Longhorn pulls several images and rolls out CRDs + DaemonSets, so give it
         # more time than the module default. Deliberately NOT atomic: a failed
