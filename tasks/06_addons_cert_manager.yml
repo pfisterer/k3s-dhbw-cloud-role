@@ -45,6 +45,9 @@
       kubernetes.core.helm:
         name: cert-manager
         chart_ref: jetstack/cert-manager
+        # See defaults/main.yml: pinned so a run does not silently upgrade the
+        # component that issues the wildcard certificate.
+        chart_version: "{{ cert_manager_chart_version }}"
         release_namespace: "{{ cert_manager_namespace }}"
         kubeconfig: "{{ kubeconfig_root }}"
         state: present

@@ -294,6 +294,16 @@ cert_manager_eab_secret_name: "cert-manager-eab-secret"
 # Namespace in which cert-manager will be deployed
 cert_manager_namespace: cert-manager
 
+# Chart version, pinned on purpose. Unpinned, this task installs whatever is
+# newest at the moment it runs, so two clusters built at different times end up
+# on different versions and nobody decided that: one deployment sat on v1.19.1
+# while another had moved to v1.20.3, and the next run would have jumped the
+# first one two minor versions in a single step. This is the component that
+# issues the wildcard certificate — an upgrade here is worth deciding, not
+# inheriting from the calendar. Raise this deliberately, after reading the
+# cert-manager release notes for the versions being skipped.
+cert_manager_chart_version: "v1.20.3"
+
 # Set to dns01 or http01. dns01 (the default) requires the RFC2136 vars below
 # (rfc2136_zone / rfc2136_tsig_secret_value / rfc2136_tsig_secret_alg /
 # rfc2136_tsig_secret_keyname); if they are unset the ClusterIssuer silently
