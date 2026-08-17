@@ -106,16 +106,19 @@
         kubeconfig: "{{ kubeconfig_root }}"
         state: present
 
-    # --- Wildcard certificate. Whenever dns01 is the active challenge (a zone and
-    # TSIG key are set — the same condition under which the ClusterIssuer uses the
-    # dns01 solver) the role issues one wildcard cert covering *.<rfc2136_zone>,
-    # replacing the per-host certs. cert-manager stores the cert+key in a TLS
-    # Secret in the Traefik namespace. A wildcard cannot be validated via http01.
-    - name: Request wildcard certificate via the DNS-01 solver
+    # --- Wildcard certificate. Requested whenever a wildcard zone is configured
+    # — by default that is the RFC2136 zone while dns01 is active, and otherwise
+    # whatever cert_manager_wildcard_zone names (see defaults/main.yml, which
+    # also documents why forcing this under http01 does not work). One cert for
+    # "*.<zone>" plus any cert_manager_wildcard_additional_dns_names replaces the
+    # per-host certs; cert-manager stores cert+key in a TLS Secret in the Traefik
+    # namespace.
+    # Parentheses matter: a Jinja filter binds tighter than `+`, so without them
+    # join() would be applied to the additional names alone and then added to a
+    # list — a type error rather than a string.
+    - name: Request wildcard certificate ({{ (['*.' ~ cert_manager_wildcard_zone] + cert_manager_wildcard_additional_dns_names) | join(', ') }})
       when: &wildcard_active
-        - cert_manager_preferred_challenge == 'dns01'
-        - rfc2136_zone | default('') | length > 0
-        - rfc2136_tsig_secret_value | default('') | length > 0
+        - cert_manager_wildcard_zone | default('') | length > 0
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_root }}"
         state: present
@@ -127,8 +130,9 @@
             namespace: "{{ traefik_namespace }}"
           spec:
             secretName: "{{ cert_manager_wildcard_secret_name }}"
-            dnsNames:
-              - "*.{{ rfc2136_zone }}"
+            # Primary SAN first: it is the one derived from the zone, and the
+            # order is what keeps an existing certificate from being reissued.
+            dnsNames: "{{ ['*.' ~ cert_manager_wildcard_zone] + cert_manager_wildcard_additional_dns_names }}"
             issuerRef:
               name: "{{ cert_manager_cluster_issuer_name }}"
               kind: ClusterIssuer
@@ -136,7 +140,9 @@
     # --- Traefik default TLS store. Traefik serves this certificate for any
     # HTTPS host whose SNI has no more-specific certificate, so Ingresses need
     # not reference a TLS Secret at all. Must be named "default" and live in the
-    # Traefik namespace alongside the wildcard Secret.
+    # Traefik namespace alongside the wildcard Secret. Same condition as the
+    # certificate above: a TLS store pointing at a Secret nobody fills would
+    # make Traefik serve its self-signed default instead.
     - name: Register wildcard certificate as the Traefik default TLS store
       when: *wildcard_active
       kubernetes.core.k8s:

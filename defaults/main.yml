@@ -321,18 +321,44 @@ cert_manager_rfc2136_tsig_secret_name: "cert-manager-rfc2136-tsig"
 cert_manager_cluster_issuer_name: certificate-cluster-issuer
 
 # --- Wildcard certificate + Traefik default TLS store ----------------------
-# Whenever dns01 is the active challenge (preferred_challenge=dns01 and the
-# RFC2136 vars are set) the role issues a single wildcard certificate covering
-# *.<rfc2136_zone> and registers it as Traefik's default TLS store, so Traefik
-# serves it for any HTTPS host that has no more-specific certificate. One cert
-# replaces the per-host certs. A wildcard matches exactly one label, so
-# *.example.com covers a.example.com but NOT the apex example.com nor
-# a.b.example.com.
+# When a wildcard zone is configured (see cert_manager_wildcard_zone below) the
+# role issues a single wildcard certificate and registers it as Traefik's
+# default TLS store, so Traefik serves it for any HTTPS host that has no
+# more-specific certificate. One cert replaces the per-host certs. A wildcard
+# matches exactly one label, so *.example.com covers a.example.com but NOT the
+# apex example.com nor a.b.example.com.
 #
 # This is additive and non-breaking: existing per-host certs keep winning by
 # SNI until you remove their cert-manager.io/cluster-issuer annotations at the
 # source (Helm values / CR / manifest) and delete the per-host Certificate
 # objects.
+#
+# Zone for the primary "*.<zone>" SAN. Empty -> no wildcard is requested, which
+# is what makes this variable the opt-in; there is no separate on/off switch.
+#
+# The default is the RFC2136 zone, but only while dns01 is actually active —
+# otherwise this would name a zone whose wildcard the CA cannot validate. Set it
+# explicitly ONLY if dns01 runs, or if the CA issues the wildcard without a
+# challenge because the domains are pre-validated on the ACME account (an
+# organisation account with EAB typically is). Over http01 a wildcard is not
+# validatable at all: cert-manager would create an Order that never completes
+# and retry it forever.
+#
+# Deliberately NOT rfc2136_zone itself: that variable is also the sole gate for
+# the ExternalDNS installation (07_addons_external_dns.yml), so setting it just
+# to obtain a certificate would deploy a DNS controller as a side effect.
+#
+# `| default('')` on the zone as well: a TSIG key set without a zone would
+# otherwise raise an undefined-variable error instead of simply meaning "no
+# wildcard".
+cert_manager_wildcard_zone: >-
+  {{ (rfc2136_zone | default('')) if (cert_manager_preferred_challenge == 'dns01'
+       and (rfc2136_tsig_secret_value | default('')) | length > 0) else '' }}
+
+# Further SANs on the same certificate, written out in full (e.g.
+# "*.apps.example.com"). For a deployment that spans more than one zone: the
+# primary "*.<cert_manager_wildcard_zone>" plus these, in one certificate.
+cert_manager_wildcard_additional_dns_names: []
 #
 # Name of the TLS Secret holding the wildcard cert+key. Created by cert-manager
 # in traefik_namespace so Traefik (and the default TLSStore) can read it.

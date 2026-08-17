@@ -385,7 +385,9 @@ These tools (Helm, kubectl, Skaffold, shell aliases and completions) are install
 | `cert_manager_namespace`                | `cert-manager`                    | Deployment namespace.                                                                                                                                                                                                        |
 | `cert_manager_preferred_challenge`      | `dns01`                           | Challenge type: `dns01` or `http01`. `dns01` (default) needs the RFC2136 vars (see ExternalDNS) and uses the role-created TSIG secret; falls back to `http01` if they are unset.                                             |
 | `cert_manager_rfc2136_tsig_secret_name` | `cert-manager-rfc2136-tsig`       | Name of the Secret the role creates (in the cert-manager namespace) holding the RFC2136 TSIG key for the `dns01` solver.                                                                                                     |
-| `cert_manager_wildcard_secret_name`     | `wildcard-tls`                    | Name of the TLS Secret (in the Traefik namespace) holding the wildcard cert+key. When `dns01` is active the role issues a `*.<rfc2136_zone>` wildcard cert into this Secret and registers it as Traefik's default TLS store. |
+| `cert_manager_wildcard_secret_name`     | `wildcard-tls`                    | Name of the TLS Secret (in the Traefik namespace) holding the wildcard cert+key, and of the `Certificate` requesting it.                                                                                                      |
+| `cert_manager_wildcard_zone`            | `rfc2136_zone` while `dns01` is active, else `""` | Zone for the primary `*.<zone>` SAN, and the opt-in for the wildcard: empty means none is requested. Set it explicitly to get a wildcard **without** `dns01` — which only works where the CA issues one without a challenge because the domains are pre-validated on the ACME account. Over `http01` a wildcard cannot be validated and the Order retries forever. Deliberately separate from `rfc2136_zone`, which also gates the ExternalDNS installation. |
+| `cert_manager_wildcard_additional_dns_names` | `[]`                         | Further SANs on the same certificate, written out in full (e.g. `"*.apps.example.com"`) — for a deployment spanning more than one zone.                                                                                       |
 | `cert_manager_cluster_issuer_name`      | `certificate-cluster-issuer`      | Name of the ClusterIssuer this role creates. Reference it from your Ingress/IngressRoute (e.g. the `cert-manager.io/cluster-issuer` annotation).                                                                             |
 | `traefik_namespace`                     | `kube-system`                     | Namespace Traefik runs in (k3s bundles it in `kube-system`). The wildcard Secret and the default `TLSStore` are created here.                                                                                                |
 | `cert_manager_private_key_secret_name`  | `cert-manager-private-key-secret` | Secret name for the ACME account private key (`privateKeySecretRef`).                                                                                                                                                        |
@@ -437,6 +439,18 @@ kubectl get nodes
 ## Changelog
 
 This role uses calendar versioning (`YYYY.MM.DD`).
+
+### 2026.08.17
+
+**Fixed**
+- **The role's tags now reach the tasks they name.** `tasks/main.yml` uses dynamic includes, which do not pass their tags to the tasks they pull in — so a run like `--tags certmanager` (or `longhorn`, `externaldns`, `bootstrap`, …) matched the include, read the file, and then skipped every task inside it. It reported success and did nothing, which is the worst way for this to fail. Every include now carries `apply: tags:` in addition to its own tags. If you have been relying on a full run or `--tags k3s` because a narrower tag "did not work", that is why.
+
+**Changed**
+- **The wildcard certificate is no longer welded to DNS-01.** It is now requested whenever `cert_manager_wildcard_zone` names a zone; that variable defaults to `rfc2136_zone` while DNS-01 is active, so **nothing changes for existing DNS-01 users**. What it adds is the case the role previously could not serve: a CA that issues a wildcard without a running challenge because the domains are pre-validated on the ACME account (an organisation account with EAB typically is). Note the limit this does not lift — over `http01` a wildcard is not validatable, and forcing one creates an Order that retries forever.
+- A separate variable rather than reusing `rfc2136_zone`, because that one is also the sole gate for the ExternalDNS installation: setting it just to obtain a certificate would deploy a DNS controller as a side effect.
+
+**Added**
+- **`cert_manager_wildcard_additional_dns_names`** (default `[]`) — further SANs on the same certificate, written out in full, for a deployment that spans more than one zone (e.g. `*.example.com` plus `*.apps.example.com`). The primary `*.<zone>` SAN stays first, so an existing certificate is not reissued.
 
 ### 2026.07.04
 
