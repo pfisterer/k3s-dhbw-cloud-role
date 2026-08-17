@@ -1,45 +1,84 @@
 ---
+# A note on `apply:` below, because it is load-bearing and easy to drop.
+#
+# These are DYNAMIC includes, and a dynamic include does not pass its own tags
+# to the tasks it pulls in. Without `apply: tags:`, a run like
+# `--tags certmanager` matches the include, reads the file — and then skips every
+# task inside it, because none of them carries the tag. The result is a play that
+# reports success and does nothing, which is the worst way for this to fail.
+# The tag stays on the include as well: that is what makes the include itself run.
+
 - name: Include preflight tasks
-  ansible.builtin.include_tasks: 01_preflight.yml
+  ansible.builtin.include_tasks:
+    file: 01_preflight.yml
+    apply:
+      tags: [preflight, python]
   tags: [preflight, python]
 
 - name: Include bootstrap tasks
-  ansible.builtin.include_tasks: 02_bootstrap.yml
+  ansible.builtin.include_tasks:
+    file: 02_bootstrap.yml
+    apply:
+      tags: [bootstrap]
   tags: [bootstrap]
 
 - name: Include network tasks
-  ansible.builtin.include_tasks: 03_network.yml
+  ansible.builtin.include_tasks:
+    file: 03_network.yml
+    apply:
+      tags: [k3s, network]
   tags: [k3s, network]
 
 - name: Include inter-node connectivity preflight
-  ansible.builtin.include_tasks: 03b_connectivity_check.yml
+  ansible.builtin.include_tasks:
+    file: 03b_connectivity_check.yml
+    apply:
+      tags: [k3s, network, preflight, connectivity]
   tags: [k3s, network, preflight, connectivity]
 
 - name: Include k3s install tasks
-  ansible.builtin.include_tasks: 04_k3s_install.yml
+  ansible.builtin.include_tasks:
+    file: 04_k3s_install.yml
+    apply:
+      tags: [k3s]
   tags: [k3s]
 
 - name: Include helm addons tasks
-  ansible.builtin.include_tasks: 05_addons_helm.yml
+  ansible.builtin.include_tasks:
+    file: 05_addons_helm.yml
+    apply:
+      tags: [helm]
   tags: [helm]
   when: k3s_role == 'server'
 
 - name: Include cert manager addons tasks
-  ansible.builtin.include_tasks: 06_addons_cert_manager.yml
+  ansible.builtin.include_tasks:
+    file: 06_addons_cert_manager.yml
+    apply:
+      tags: [certmanager]
   tags: [certmanager]
   when: k3s_role == 'server'
 
 - name: Include external DNS addons tasks
-  ansible.builtin.include_tasks: 07_addons_external_dns.yml
+  ansible.builtin.include_tasks:
+    file: 07_addons_external_dns.yml
+    apply:
+      tags: [externaldns]
   tags: [externaldns]
   when: k3s_role == 'server'
 
 - name: Include longhorn addon tasks
-  ansible.builtin.include_tasks: 08_addons_longhorn.yml
+  ansible.builtin.include_tasks:
+    file: 08_addons_longhorn.yml
+    apply:
+      tags: [longhorn, storage]
   tags: [longhorn, storage]
   when: k3s_role == 'server' and longhorn_enabled | bool
 
 - name: Include automated k3s upgrade addon tasks
-  ansible.builtin.include_tasks: 09_addons_system_upgrade.yml
+  ansible.builtin.include_tasks:
+    file: 09_addons_system_upgrade.yml
+    apply:
+      tags: [upgrade, autoupgrade]
   tags: [upgrade, autoupgrade]
   when: k3s_role == 'server' and k3s_auto_upgrade_enabled | bool
