@@ -99,6 +99,20 @@
         src: cluster_issuer.yaml.j2
         dest: /tmp/cluster_issuer.yaml
         mode: "0600"
+      # Renders in `--check` too. Without it the apply task below finds no file
+      # and the run stops there — which put `--tags certmanager --check --diff`
+      # out of reach, i.e. the one check a consumer wants before letting this
+      # role near a production ClusterIssuer or wildcard certificate.
+      #
+      # A deliberate exception to check-mode semantics, kept narrow: /tmp is
+      # scratch, the file is only an input to the next task, and it is rewritten
+      # every run. Nothing in the cluster is touched here — the apply task still
+      # honours --check.
+      #
+      # changed_when: false so a check run's "changed" count keeps meaning
+      # "would change something in the cluster".
+      check_mode: false
+      changed_when: false
 
     - name: Apply cert-manager ClusterIssuer for Let's Encrypt Production
       kubernetes.core.k8s:

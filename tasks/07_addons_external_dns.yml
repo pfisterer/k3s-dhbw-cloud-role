@@ -24,6 +24,11 @@
         owner: root
         group: root
         mode: "0600"
+      # Renders in --check too: the helm task below reads this file back, and a
+      # check run that skipped the render fails on the missing values file. Same
+      # exception as the ClusterIssuer render — see 06_addons_cert_manager.yml.
+      check_mode: false
+      changed_when: false
 
     - name: Install or upgrade External-DNS
       kubernetes.core.helm:

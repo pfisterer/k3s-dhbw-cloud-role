@@ -4,6 +4,12 @@
   register: python_check
   failed_when: python_check.rc > 1
   changed_when: false
+  # Probes in --check too. `raw` is skipped in check mode like any command, and
+  # a skipped task registers a dict WITHOUT `rc` — so the next task's
+  # `when: python_check.rc != 0` failed the whole play at the first preflight
+  # step, before anything could be inspected. This task only reads (test -e),
+  # so running it changes nothing that check mode exists to protect.
+  check_mode: false
 
 - name: Install minimal Python 3 using 'raw' module if not present (Bootstrapping)
   when: python_check.rc != 0

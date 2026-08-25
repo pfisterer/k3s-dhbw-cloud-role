@@ -41,12 +41,21 @@
         url: "{{ _suc_manifest_base }}/crd.yaml"
         dest: /root/system-upgrade-controller-crd.yaml
         mode: "0600"
+      # Downloads in --check too, for the same reason the renders do: the apply
+      # tasks below read these files, so skipping the fetch ends the run instead
+      # of showing what would change. Note the difference to a template render —
+      # this one reaches the network in a check run. It writes to /root and
+      # touches nothing in the cluster.
+      check_mode: false
+      changed_when: false
 
     - name: Download system-upgrade-controller manifest
       ansible.builtin.get_url:
         url: "{{ _suc_manifest_base }}/system-upgrade-controller.yaml"
         dest: /root/system-upgrade-controller.yaml
         mode: "0600"
+      check_mode: false
+      changed_when: false
 
     - name: Apply the system-upgrade-controller CRD
       kubernetes.core.k8s:
