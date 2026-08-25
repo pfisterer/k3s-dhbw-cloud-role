@@ -84,6 +84,12 @@ k3s_exec_args: ""
 # Extra arguments appended verbatim to the computed k3s server install arguments.
 k3s_extra_exec_args: ""
 
+# Extra arguments appended verbatim to the computed k3s agent install arguments.
+# Use it for per-node flags that must be in place from the moment the node
+# registers, e.g. --node-label. Labels applied later through the API are not
+# visible to workloads scheduled during the same run.
+k3s_extra_agent_exec_args: ""
+
 # Standard path where K3s stores the main kubeconfig file on the node.
 kubeconfig_root: /etc/rancher/k3s/k3s.yaml
 
@@ -190,6 +196,15 @@ skaffold_version: "latest"
 # nfs-common are installed automatically on all nodes during bootstrap when on.
 longhorn_enabled: "{{ (ansible_play_hosts_all | default([]) | length) > 1 }}"
 longhorn_namespace: longhorn-system
+
+# Node selector restricting where Longhorn runs, as a mapping of node labels.
+# Empty = every node, the chart default. When set it is applied twice: to
+# global.nodeSelector for the user-deployed components (manager, UI, driver
+# deployer) and to the system-managed-components-node-selector setting for the
+# instance managers, engine images and the CSI plugin. Only both together keep
+# Longhorn off a node. The nodes must carry the labels before this role runs,
+# see k3s_extra_agent_exec_args.
+longhorn_node_selector: {}
 
 # Longhorn Helm chart version. Empty = latest from the chart repository; pin a tag
 # (e.g. "1.7.2") for reproducible installs.

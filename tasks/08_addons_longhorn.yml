@@ -49,6 +49,9 @@
         kubeconfig: "{{ kubeconfig_root }}"
         state: present
         values:
+          # Chart default is an empty mapping, so an unset variable changes nothing.
+          global:
+            nodeSelector: "{{ longhorn_node_selector }}"
           persistence:
             defaultClass: "{{ longhorn_default_storage_class | bool }}"
             defaultClassReplicaCount: "{{ longhorn_replica_count | int }}"
@@ -59,6 +62,14 @@
             # -- to NEW volumes only. Existing volumes keep the locality in their spec.
             defaultDataLocality: "{{ longhorn_data_locality }}"
           defaultSettings:
+            # Longhorn separates key and value with a colon here, not with an
+            # equals sign, and joins several labels with a semicolon. omit keeps
+            # the key out of the values when the variable is empty.
+            systemManagedComponentsNodeSelector: >-
+              {{ (longhorn_node_selector | dict2items | map(attribute='key')
+                  | zip(longhorn_node_selector | dict2items | map(attribute='value'))
+                  | map('join', ':') | join(';'))
+                 if longhorn_node_selector else omit }}
             defaultReplicaCount: "{{ longhorn_replica_count | int }}"
             # Same locality default for volumes created outside the StorageClass.
             defaultDataLocality: "{{ longhorn_data_locality }}"

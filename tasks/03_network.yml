@@ -87,7 +87,11 @@
          else (_reachable_host if _reachable_host not in _node_ip_list else '') }}
     # Agents set only --node-ip explicitly (per-family); flannel, kube-proxy and the
     # network-policy controller are all k3s defaults and need no extra flags.
-    _k3s_agent_exec_args: "{{ ['--node-ip=' + (_node_ip_list | join(','))] | select | join(' ') }}"
+    _k3s_agent_exec_args: >-
+      {{ [
+           '--node-ip=' + (_node_ip_list | join(',')),
+           (k3s_extra_agent_exec_args if (k3s_extra_agent_exec_args | length > 0) else '')
+         ] | select | join(' ') }}
 
 - name: Build k3s server exec args
   ansible.builtin.set_fact:
