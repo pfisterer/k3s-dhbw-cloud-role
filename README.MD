@@ -329,7 +329,7 @@ Before installing k3s, the role checks that the flannel overlay port is reachabl
 | ------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `preflight_connectivity_check` | _auto_  | Verify the flannel overlay port is reachable between all nodes in both directions before installing k3s. Auto: **on** for a multi-node run, **off** for a single node. Set `true`/`false` to override. |
 | `preflight_overlay_port`       | `0`     | Overlay UDP port to probe. `0` = auto-detect: `8472` for the default VXLAN backend, `51820` when `wireguard` appears in `k3s_extra_exec_args`. Set a fixed port for other backends.                    |
-| `preflight_probe_duration`     | `5`     | Seconds each node listens for probes from its peers. The default is comfortably longer than the senders need; raise it only on very slow links.                                                        |
+| `preflight_probe_duration`     | `30`    | Maximum seconds each node waits for all peer tokens. Successful rounds exit early; the maximum absorbs slow controller/SSH async-job starts.                                                       |
 
 ### Storage (Longhorn)
 
