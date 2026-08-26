@@ -1,10 +1,24 @@
 ---
 
+# helm_plugin with state: present is not idempotent in check mode: it skips the
+# actual `helm plugin install` and then hardcodes rc=0, which its own success
+# branch reads as "installed successfully" -> changed. A check run therefore
+# reported this plugin as changed forever, no matter what the host had. So ask
+# first and only install what is missing; in a real run the install is still the
+# one that reports the change.
+- name: Get the installed helm plugins
+  become: true
+  kubernetes.core.helm_plugin_info:
+  register: _helm_plugins
+  check_mode: false
+  changed_when: false
+
 - name: Ensure helm-diff plugin is installed
   become: true
   kubernetes.core.helm_plugin:
     plugin_path: https://github.com/databus23/helm-diff
     state: present
+  when: "'diff' not in (_helm_plugins.plugin_list | map(attribute='name') | list)"
 
 # Add helm repos
 - name: Ensure all necessary Helm repositories are present
