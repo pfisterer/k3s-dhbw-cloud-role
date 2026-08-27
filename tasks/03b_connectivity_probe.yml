@@ -146,10 +146,11 @@
           The overlay preflight into {{ _probe_dest }}
           ({{ hostvars[_probe_dest]._node_ip_list | join(', ') }}) did not pass.
         _sender_text: >-
-          These nodes could not write to every address of {{ _probe_dest }}, so
-          flannel would carry no pod traffic over the addresses they missed. This
-          is a fault on the sending nodes, not in the network. Affected are
-          {{ _bad_senders | join(', ') }}. Their stderr reads
+          These nodes could not write to every address of {{ _probe_dest }}. Every
+          address is required because the check cannot know which of them the CNI
+          will use as a tunnel endpoint. The write failed on the sending node
+          itself, which is not a proven ingress block at {{ _probe_dest }}.
+          Affected are {{ _bad_senders | join(', ') }}. Their stderr reads
           {{ _sender_errors | join(' | ') }}.
         _slow_text: >-
           Some of them were still running when their result was collected, which

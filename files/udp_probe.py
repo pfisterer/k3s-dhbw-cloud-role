@@ -78,9 +78,13 @@ def send(port, token, hosts):
     # route exists or a local rule rejects it or it does not resolve, must not
     # skip the remaining addresses, otherwise a reachable family stays untried
     # and the caller reads the missing token as a blocked port. It must also not
-    # be forgiven, because one working family cannot stand in for a broken one,
-    # over which flannel would then carry no pod traffic. So every address is
-    # tried and every address has to succeed at least once.
+    # be forgiven either. The caller passes the addresses it will hand to k3s as
+    # --node-ip, and neither it nor this script can know which of them the CNI
+    # will end up using as a tunnel endpoint. Letting one working address vouch
+    # for the rest would pass a node whose other address is locally unreachable,
+    # so every address is tried and every one has to succeed at least once. That
+    # is deliberately conservative and will fail a node whose second address the
+    # CNI never uses.
     # socket.gaierror is an OSError subclass, so one handler covers both the
     # lookup and the write.
     payload = token.encode("utf-8")
@@ -94,12 +98,19 @@ def send(port, token, hosts):
                 with socket.socket(family, socktype, proto) as sock:
                     sock.sendto(payload, sockaddr)
             except OSError as error:
-                failures[host] = error
+                failures.setdefault(host, []).append(error)
                 continue
             delivered.add(host)
         time.sleep(SEND_INTERVAL)
-    for host, error in sorted(failures.items()):
-        sys.stderr.write("send to %s failed with %s\n" % (host, error))
+    for host, errors in sorted(failures.items()):
+        seen = []
+        for error in errors:
+            if str(error) not in seen:
+                seen.append(str(error))
+        sys.stderr.write(
+            "send to %s failed %d of %d times with %s\n"
+            % (host, len(errors), SEND_COUNT, " and ".join(seen))
+        )
     unwritten = [host for host in hosts if host not in delivered]
     if unwritten:
         sys.stderr.write(
