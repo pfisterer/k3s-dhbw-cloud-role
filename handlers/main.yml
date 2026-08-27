@@ -1,0 +1,16 @@
+---
+# k3s reads /etc/rancher/k3s/config.yaml.d only at start, so a changed drop-in
+# needs a restart to take effect.
+#
+# A handler rather than a restart inside the task: several tasks may want it, and
+# this way the node is restarted once, at the end, instead of once per change.
+#
+# On a single-node cluster this briefly takes the API server away — seconds, and
+# containers keep running throughout, because containerd is not restarted with
+# it. Worth knowing before running this against production during office hours.
+- name: Restart k3s
+  become: true
+  ansible.builtin.systemd:
+    name: "{{ 'k3s' if k3s_role == 'server' else 'k3s-agent' }}"
+    state: restarted
+  listen: Restart k3s

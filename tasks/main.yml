@@ -43,6 +43,13 @@
       tags: [k3s]
   tags: [k3s]
 
+- name: Include kubelet image garbage collection tasks
+  ansible.builtin.include_tasks:
+    file: 04b_kubelet_image_gc.yml
+    apply:
+      tags: [k3s, image_gc]
+  tags: [k3s, image_gc]
+
 - name: Include helm addons tasks
   ansible.builtin.include_tasks:
     file: 05_addons_helm.yml

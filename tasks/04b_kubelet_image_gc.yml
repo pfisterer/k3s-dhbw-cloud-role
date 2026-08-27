@@ -1,0 +1,58 @@
+---
+# Keep the node's disk from filling up with images nobody runs any more.
+#
+# kubelet already does this job — it removes unused images, oldest first, and
+# never touches one a container is using. What it does NOT do by default is
+# start early enough: image-gc-high-threshold is 85%, so the disk sits at 84%
+# until something else notices. On production it reached 83% with 19 GB of
+# containerd data behind 5.9 GB of actual image layers, the rest being snapshots
+# of 133 images going back months. The node was in constant page-cache reclaim,
+# and log pushes to Loki timed out while Loki itself was idle.
+#
+# So this lowers the thresholds rather than adding a cron with `crictl rmi
+# --prune`. A cron would be a SECOND owner of one responsibility, which is the
+# same mistake as the helm-diff plugin being installed by this role and pinned by
+# the playbook: both kept reporting "changed" forever, and neither was wrong on
+# its own.
+#
+# Written as a config.yaml.d drop-in, not as INSTALL_K3S_EXEC arguments. The
+# install task carries `creates: /usr/local/bin/k3s`, so exec args reach a node
+# exactly once, at install time, and never again — an existing cluster would
+# silently keep the defaults. k3s reads this directory on every start.
+
+- name: Ensure the k3s config drop-in directory exists
+  become: true
+  ansible.builtin.file:
+    path: /etc/rancher/k3s/config.yaml.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Configure kubelet image garbage collection
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/rancher/k3s/config.yaml.d/10-image-gc.yaml
+    owner: root
+    group: root
+    mode: "0600"
+    # low_threshold is the one to think about before changing. kubelet deletes
+    # until usage drops BELOW it and gives up otherwise, so it has to stay above
+    # what the node uses for everything that is not an image — PVCs, journal,
+    # the system itself. Set it under that and kubelet retries every couple of
+    # minutes, deletes everything deletable, and still never succeeds.
+    content: |
+      # Managed by the k3s-dhbw-cloud role. Do not edit on the node.
+      kubelet-arg:
+        - "image-gc-high-threshold={{ k3s_image_gc_high_threshold }}"
+        - "image-gc-low-threshold={{ k3s_image_gc_low_threshold }}"
+  when: k3s_image_gc_enabled | bool
+  notify: Restart k3s
+
+- name: Remove the image garbage collection drop-in when disabled
+  become: true
+  ansible.builtin.file:
+    path: /etc/rancher/k3s/config.yaml.d/10-image-gc.yaml
+    state: absent
+  when: not (k3s_image_gc_enabled | bool)
+  notify: Restart k3s

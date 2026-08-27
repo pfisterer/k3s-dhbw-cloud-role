@@ -84,6 +84,26 @@ k3s_exec_args: ""
 # Extra arguments appended verbatim to the computed k3s server install arguments.
 k3s_extra_exec_args: ""
 
+# -----------------------------------------------------------------------------
+## 🧹 Kubelet image garbage collection
+# -----------------------------------------------------------------------------
+# kubelet removes unused images on its own — but only once the disk is fuller
+# than image-gc-high-threshold, which upstream sets to 85%. That is late enough
+# that the node spends a long time near-full first. These lower it.
+#
+# Off means "leave kubelet's defaults alone": the drop-in is REMOVED when this is
+# false, so turning it off actually reverts rather than freezing the last values.
+k3s_image_gc_enabled: true
+
+# Start collecting above this percentage of disk usage...
+k3s_image_gc_high_threshold: 75
+
+# ...and delete unused images, oldest first, until usage falls below this one.
+# It must stay ABOVE what the node uses for everything that is not an image
+# (PVCs, journal, the system). Below that, kubelet can never reach it, and it
+# retries every few minutes having already deleted all it can.
+k3s_image_gc_low_threshold: 65
+
 # Standard path where K3s stores the main kubeconfig file on the node.
 kubeconfig_root: /etc/rancher/k3s/k3s.yaml
 
