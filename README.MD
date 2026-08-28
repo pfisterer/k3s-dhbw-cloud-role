@@ -315,6 +315,7 @@ All variables are defined in `defaults/main.yml` and can be overridden per host 
 | `k3s_service_cidr_ipv4` | `10.43.0.0/16`              | IPv4 service CIDR (k3s default).                                                                                                                                                                         |
 | `k3s_cluster_cidr_ipv6` | `fd00:42::/56`              | IPv6 pod CIDR (ULA). Only applied when IPv6 is involved.                                                                                                                                                 |
 | `k3s_service_cidr_ipv6` | `fd00:43::/112`             | IPv6 service CIDR (ULA). Only applied when IPv6 is involved.                                                                                                                                             |
+| `upstream_dns_servers`  | `[]`                        | Upstream DNS resolvers for the node and — via CoreDNS' `forward . /etc/resolv.conf` — every pod. Empty = leave the host's resolver setup alone. A list writes `/etc/resolv.conf` statically (replacing a systemd-resolved symlink), keeps it immutable (`chattr +i`) against cloud-init/DHCP rewrites, and rolls CoreDNS on an existing cluster. At most three, bare IPv4/IPv6 literals. |
 | `k3s_node_external_ip`  | `""`                        | Externally reachable node IP (`--node-external-ip`). Empty = auto-detect from the address Ansible connects through (`ansible_host`) whenever it differs from the internal interface address (e.g. NAT).  |
 | `k3s_exec_args`         | `""`                        | Set to a non-empty string to **fully override** the dynamically computed k3s server install arguments. Empty = use the computed args.                                                                    |
 | `k3s_extra_exec_args`   | `""`                        | Extra arguments appended verbatim to the computed k3s server install arguments.                                                                                                                          |
@@ -439,6 +440,11 @@ kubectl get nodes
 ## Changelog
 
 This role uses calendar versioning (`YYYY.MM.DD`).
+
+### 2026.08.28
+
+**Added**
+- **`upstream_dns_servers`** (default `[]`) — the node's upstream resolvers, written to `/etc/resolv.conf` as a static, immutable file (a systemd-resolved symlink is replaced, `chattr +i` keeps cloud-init and DHCP hooks from rewriting it) and rolled into CoreDNS on an already-installed cluster. Empty leaves the host alone, so existing setups are unchanged. Cloud images ship a single DHCP-supplied or hand-edited resolver, and CoreDNS (`forward . /etc/resolv.conf`) can only fail over between resolvers it can see; on 2026-08-27 the path to that one resolver flapped for nine hours and took every external-name lookup on the cluster with it. Tag `upstream_dns`.
 
 ### 2026.08.17
 

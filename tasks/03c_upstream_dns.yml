@@ -1,0 +1,69 @@
+---
+# Static upstream resolvers for the node and, via CoreDNS' `forward .
+# /etc/resolv.conf`, for every pod. Included only when upstream_dns_servers is
+# set (see tasks/main.yml).
+#
+# /etc/resolv.conf is written as a plain file, deliberately bypassing
+# systemd-resolved: glibc, containerd, helm and CoreDNS all read the file
+# directly, and on the OpenStack images seen so far the resolved stub
+# (127.0.0.53) was the unreliable part — refused or timed-out queries while the
+# unit reported active. Replacing the symlink takes resolved out of the path;
+# netplan/DHCP keep feeding it, and nothing consults it any more.
+#
+# Pods copy the node's resolv.conf when they are created, so a changed file only
+# reaches CoreDNS through a rollout. That is done below when k3s is already
+# installed; on a first install CoreDNS starts with the new file anyway.
+#
+# The file is kept IMMUTABLE (chattr +i) once written: hosts set up by hand had
+# that bit already, as the only thing that reliably stops cloud-init, DHCP
+# hooks or a resolved switch from rewriting the file behind the cluster's back.
+# The write below lifts it and puts it back; neither step is reported as a
+# change, only the content is.
+
+- name: Lift the immutable bit on /etc/resolv.conf for the write
+  ansible.builtin.file:
+    path: /etc/resolv.conf
+    attributes: "-i"
+    # follow: false, or a resolved symlink would be chattr'ed at its target.
+    follow: false
+  changed_when: false
+  # Missing file or a symlink (chattr does not apply to links): nothing to lift.
+  failed_when: false
+
+- name: Write static /etc/resolv.conf with the upstream resolvers
+  ansible.builtin.copy:
+    dest: /etc/resolv.conf
+    owner: root
+    group: root
+    mode: "0644"
+    # Do not write THROUGH a systemd-resolved symlink into
+    # /run/systemd/resolve/stub-resolv.conf — replace the link with a file.
+    follow: false
+    content: |
+      # Managed by k3s-dhbw-cloud-role (upstream_dns_servers) — local edits are overwritten.
+      {% for ns in upstream_dns_servers %}
+      nameserver {{ ns }}
+      {% endfor %}
+      options timeout:2 attempts:2
+  register: _upstream_dns_resolv_conf
+
+- name: Make /etc/resolv.conf immutable again
+  ansible.builtin.file:
+    path: /etc/resolv.conf
+    attributes: "+i"
+  changed_when: false
+
+- name: Check whether k3s is installed yet (CoreDNS can only be rolled then)
+  ansible.builtin.stat:
+    path: "{{ kubeconfig_root }}"
+  register: _upstream_dns_kubeconfig
+  when: k3s_role == 'server'
+
+- name: Roll CoreDNS so it picks up the new resolv.conf # noqa: no-handler
+  ansible.builtin.command:
+    cmd: k3s kubectl --kubeconfig {{ kubeconfig_root }} -n kube-system rollout restart deployment/coredns
+  when:
+    - k3s_role == 'server'
+    - _upstream_dns_resolv_conf is changed
+    - _upstream_dns_kubeconfig.stat.exists
+  changed_when: true

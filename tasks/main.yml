@@ -29,6 +29,14 @@
       tags: [k3s, network]
   tags: [k3s, network]
 
+- name: Include upstream DNS resolver tasks
+  ansible.builtin.include_tasks:
+    file: 03c_upstream_dns.yml
+    apply:
+      tags: [k3s, network, upstream_dns]
+  tags: [k3s, network, upstream_dns]
+  when: upstream_dns_servers | length > 0
+
 - name: Include inter-node connectivity preflight
   ansible.builtin.include_tasks:
     file: 03b_connectivity_check.yml

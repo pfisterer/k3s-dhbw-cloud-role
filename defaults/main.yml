@@ -34,6 +34,16 @@ k3s_service_cidr_ipv6: "fd00:43::/112"
 # internal interface address (e.g. NAT). Set explicitly only for edge cases.
 k3s_node_external_ip: ""
 
+# Upstream DNS resolvers for the node — and, through `forward . /etc/resolv.conf`
+# in k3s' CoreDNS, for every pod. Empty (default) = the host's resolver setup is
+# left alone. A non-empty list writes /etc/resolv.conf as a static file
+# (replacing a systemd-resolved symlink when there is one) and rolls CoreDNS on
+# an already-installed cluster so it sees the change. Cloud images usually ship
+# ONE DHCP-supplied or hand-edited resolver; CoreDNS can only fail over between
+# resolvers it can see. Bare IPv4/IPv6 literals; at most three — glibc ignores
+# any beyond the third, CoreDNS would use them, and the two should not differ.
+upstream_dns_servers: []
+
 # -----------------------------------------------------------------------------
 ## 🩺 Preflight: inter-node overlay connectivity check
 # -----------------------------------------------------------------------------
