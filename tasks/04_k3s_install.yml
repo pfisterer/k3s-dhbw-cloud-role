@@ -20,22 +20,35 @@
         path: "{{ kubeconfig_root }}"
         timeout: 180
 
-    - name: Replace localhost with actual node IP in kubeconfig
-      # k3s writes the IPv4 loopback (127.0.0.1) or the IPv6 loopback ([::1])
-      # depending on the stack, so match both.
-      ansible.builtin.replace:
-        path: "{{ kubeconfig_root }}"
-        regexp: '^(\s*server:\s+)https://(127\.0\.0\.1|\[::1\]):6443'
-        replace: '\1{{ kubeconfig_url }}'
-
-    - name: Copy kubeconfig to localhost
-      ansible.builtin.fetch:
+    # The kubeconfig on the host is left exactly as k3s writes it. k3s rewrites
+    # it on every start, pointed at the loopback address, so patching it in
+    # place (as this role did until 2026.08.28) was undone by the next restart
+    # and reported "changed" on every run thereafter — a permanent diff that
+    # meant nothing, since loopback works on the host anyway. Only the copy on
+    # the control node needs the reachable address, so the rewrite happens
+    # there, on the way through.
+    - name: Read the kubeconfig from the server
+      ansible.builtin.slurp:
         src: "{{ kubeconfig_root }}"
+      register: _k3s_kubeconfig
+
+    - name: Write the kubeconfig to the control node, pointed at the reachable address
+      vars:
+        # k3s writes the IPv4 loopback (127.0.0.1) or the IPv6 loopback ([::1])
+        # depending on the stack, so match both. Kept out of the Jinja
+        # expression: Ansible does not unescape backslashes in Jinja string
+        # literals, which turns a `\1` there into a literal backslash-one.
+        _loopback_server: '^(\s*server:\s+)https://(127\.0\.0\.1|\[::1\]):6443$'
+        _reachable_server: '\g<1>{{ kubeconfig_url }}'
+      ansible.builtin.copy:
+        content: "{{ _k3s_kubeconfig.content | b64decode | regex_replace(_loopback_server, _reachable_server, multiline=true) }}"
         # kubeconfig_path overrides the default name when set. Sanitize ':' so IPv6
         # inventory host names still yield filesystem-friendly default paths.
-        # fetch overwrites the local file whenever the remote content differs.
         dest: "{{ kubeconfig_path if (kubeconfig_path | length > 0) else './kubeconfig-' + (inventory_hostname | replace(':', '_')) + '.yaml' }}"
-        flat: true
+        # A credential: owner-only, like k3s keeps its own copy.
+        mode: "0600"
+      delegate_to: localhost
+      become: false
 
     # Readiness gate before the add-ons (which need a working pod network):
     # k3s' built-in flannel brings the node Ready on its own, so wait for it here.

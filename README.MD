@@ -443,6 +443,9 @@ This role uses calendar versioning (`YYYY.MM.DD`).
 
 ### 2026.08.28
 
+**Fixed**
+- **The kubeconfig on the server is no longer patched in place.** k3s rewrites `/etc/rancher/k3s/k3s.yaml` on every start, pointed at loopback, so the in-place rewrite to the node address was undone by the next restart and every later run reported it as changed — a permanent, meaningless diff. The rewrite now happens on the way to the control node only; the fetched file is unchanged in content, and is now written `0600`.
+
 **Added**
 - **`upstream_dns_servers`** (default `[]`) — the node's upstream resolvers, written to `/etc/resolv.conf` as a static, immutable file (a systemd-resolved symlink is replaced, `chattr +i` keeps cloud-init and DHCP hooks from rewriting it) and rolled into CoreDNS on an already-installed cluster. Empty leaves the host alone, so existing setups are unchanged. Cloud images ship a single DHCP-supplied or hand-edited resolver, and CoreDNS (`forward . /etc/resolv.conf`) can only fail over between resolvers it can see; on 2026-08-27 the path to that one resolver flapped for nine hours and took every external-name lookup on the cluster with it. Tag `upstream_dns`.
 
