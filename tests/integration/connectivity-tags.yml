@@ -1,0 +1,35 @@
+---
+- name: Exercise the connectivity tag on fresh nodes
+  hosts: k3s_nodes
+  gather_facts: false
+  vars:
+    ip_family: ipv4
+    ip_family_primary: auto
+    k3s_cluster_cidr_ipv4: 10.42.0.0/16
+    k3s_cluster_cidr_ipv6: fd00:42::/56
+    k3s_service_cidr_ipv4: 10.43.0.0/16
+    k3s_service_cidr_ipv6: fd00:43::/112
+    k3s_node_external_ip: ""
+    k3s_extra_exec_args: ""
+    k3s_role: server
+    longhorn_enabled: false
+    longhorn_default_storage_class: false
+    preflight_connectivity_check: true
+    preflight_overlay_port: 48472
+    preflight_probe_duration: 30
+
+  pre_tasks:
+    - name: Provide deterministic fresh-node network facts
+      ansible.builtin.set_fact:
+        ansible_facts:
+          default_ipv4:
+            address: 127.0.0.1
+          default_ipv6: {}
+      tags: [always]
+
+  tasks:
+    # The path deliberately targets this checkout rather than an installed role.
+    - name: Run role tasks without pre-existing derived facts # noqa: role-name[path]
+      ansible.builtin.include_role:
+        name: "{{ playbook_dir }}/../.."
+      tags: [always]

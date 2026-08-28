@@ -26,8 +26,8 @@
   ansible.builtin.include_tasks:
     file: 03_network.yml
     apply:
-      tags: [k3s, network]
-  tags: [k3s, network]
+      tags: [k3s, network, preflight, connectivity]
+  tags: [k3s, network, preflight, connectivity]
 
 - name: Include upstream DNS resolver tasks
   ansible.builtin.include_tasks:
