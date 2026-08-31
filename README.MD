@@ -315,7 +315,8 @@ All variables are defined in `defaults/main.yml` and can be overridden per host 
 | `k3s_service_cidr_ipv4` | `10.43.0.0/16`              | IPv4 service CIDR (k3s default).                                                                                                                                                                         |
 | `k3s_cluster_cidr_ipv6` | `fd00:42::/56`              | IPv6 pod CIDR (ULA). Only applied when IPv6 is involved.                                                                                                                                                 |
 | `k3s_service_cidr_ipv6` | `fd00:43::/112`             | IPv6 service CIDR (ULA). Only applied when IPv6 is involved.                                                                                                                                             |
-| `upstream_dns_servers`  | `[]`                        | Upstream DNS resolvers for the node and — via CoreDNS' `forward . /etc/resolv.conf` — every pod. Empty = leave the host's resolver setup alone. A list writes `/etc/resolv.conf` statically (replacing a systemd-resolved symlink), keeps it immutable (`chattr +i`) against cloud-init/DHCP rewrites, and rolls CoreDNS on an existing cluster. At most three, bare IPv4/IPv6 literals. |
+| `upstream_dns_servers`  | `[]`                        | Upstream DNS resolvers for the node and — via CoreDNS' `forward . /etc/resolv.conf` — every pod. Empty = leave the host's resolver setup alone. A list writes `/etc/resolv.conf` statically (replacing a systemd-resolved symlink), keeps it immutable (`chattr +i`) against cloud-init/DHCP rewrites, and rolls CoreDNS on an existing cluster. Setting it back to `[]` releases a role-managed file (immutable bit lifted, content left). At most three, bare IPv4/IPv6 literals. If the host's CURRENT resolver is broken, apply with `--tags upstream_dns` — the full play needs DNS before it reaches these tasks. |
+| `upstream_dns_search`   | `[]`                        | Optional `search` domains for the managed `/etc/resolv.conf` — the static file replaces DHCP's, so restate any search domain the host relies on. |
 | `k3s_node_external_ip`  | `""`                        | Externally reachable node IP (`--node-external-ip`). Empty = auto-detect from the address Ansible connects through (`ansible_host`) whenever it differs from the internal interface address (e.g. NAT).  |
 | `k3s_exec_args`         | `""`                        | Set to a non-empty string to **fully override** the dynamically computed k3s server install arguments. Empty = use the computed args.                                                                    |
 | `k3s_extra_exec_args`   | `""`                        | Extra arguments appended verbatim to the computed k3s server install arguments.                                                                                                                          |
@@ -441,7 +442,16 @@ kubectl get nodes
 
 This role uses calendar versioning (`YYYY.MM.DD`).
 
-### 2026.08.28
+### 2026.08.31
+
+**Fixed**
+- **`upstream_dns_servers: []` now actually reverts.** Emptying the list used to skip the tasks entirely, stranding the previously written `/etc/resolv.conf` behind its immutable bit forever — while the docs claimed "empty leaves the host alone". Empty now releases a role-managed file (marker in line 1: immutable bit lifted, content left in place) and never touches an unmanaged one.
+- The re-`chattr +i` is best-effort (`failed_when: false`) so filesystems without chattr keep the written file instead of failing the play.
+
+**Added**
+- **`upstream_dns_search`** (default `[]`) — the static resolv.conf replaces DHCP's, so hosts that rely on a search domain restate it here.
+- Recovery note: when the host's current resolver is the broken thing, run `--tags upstream_dns` — the full play needs DNS (apt/curl) before it reaches these tasks.
+
 
 **Fixed**
 - **The kubeconfig on the server is no longer patched in place.** k3s rewrites `/etc/rancher/k3s/k3s.yaml` on every start, pointed at loopback, so the in-place rewrite to the node address was undone by the next restart and every later run reported it as changed — a permanent, meaningless diff. The rewrite now happens on the way to the control node only; the fetched file is unchanged in content, and is now written `0600`.

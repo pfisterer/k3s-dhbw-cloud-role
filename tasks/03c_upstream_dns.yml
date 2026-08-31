@@ -1,7 +1,6 @@
 ---
 # Static upstream resolvers for the node and, via CoreDNS' `forward .
-# /etc/resolv.conf`, for every pod. Included only when upstream_dns_servers is
-# set (see tasks/main.yml).
+# /etc/resolv.conf`, for every pod.
 #
 # /etc/resolv.conf is written as a plain file, deliberately bypassing
 # systemd-resolved: glibc, containerd, helm and CoreDNS all read the file
@@ -10,16 +9,56 @@
 # unit reported active. Replacing the symlink takes resolved out of the path;
 # netplan/DHCP keep feeding it, and nothing consults it any more.
 #
-# Pods copy the node's resolv.conf when they are created, so a changed file only
-# reaches CoreDNS through a rollout. That is done below when k3s is already
-# installed; on a first install CoreDNS starts with the new file anyway.
-#
 # The file is kept IMMUTABLE (chattr +i) once written: hosts set up by hand had
 # that bit already, as the only thing that reliably stops cloud-init, DHCP
 # hooks or a resolved switch from rewriting the file behind the cluster's back.
-# The write below lifts it and puts it back; neither step is reported as a
-# change, only the content is.
+#
+# REVERT: an empty upstream_dns_servers releases a file this role wrote (marker
+# in line 1) — the immutable bit is lifted and the content left in place, so
+# the admin/DHCP/resolved can take over again. A file WITHOUT the marker is
+# never touched, so "empty = hands off" stays true for hosts the role never
+# managed.
+#
+# RECOVERY NOTE: in a full run these tasks come after bootstrap tasks that need
+# working DNS (apt, curl downloads). If the host's current resolver is the
+# broken thing — the very scenario this feature exists for — apply just this
+# file with `--tags upstream_dns`.
+#
+# Pods copy the node's resolv.conf when they are created, so a changed file only
+# reaches CoreDNS through a rollout. That is done below when k3s is already
+# installed; on a first install CoreDNS starts with the new file anyway.
 
+- name: Read the current /etc/resolv.conf (managed-marker detection)
+  ansible.builtin.slurp:
+    src: /etc/resolv.conf
+  register: _upstream_dns_current
+  failed_when: false
+
+- name: Determine whether the file is role-managed
+  ansible.builtin.set_fact:
+    _upstream_dns_managed: "{{ (_upstream_dns_current.content | default('') | b64decode).startswith('# Managed by k3s-dhbw-cloud-role') }}"
+
+# ── Revert path ───────────────────────────────────────────────────────────────
+- name: Release a previously managed /etc/resolv.conf (empty resolver list)
+  ansible.builtin.file:
+    path: /etc/resolv.conf
+    attributes: "-i"
+    follow: false
+  when: upstream_dns_servers | length == 0 and _upstream_dns_managed
+  # Failing to lift a bit that may not be set (or a fs without chattr) must not
+  # break the revert; the debug below still tells the operator what remains.
+  failed_when: false
+
+- name: Explain the released file # noqa: no-handler
+  ansible.builtin.debug:
+    msg: >-
+      upstream_dns_servers is empty: the role-managed /etc/resolv.conf was made
+      mutable again but its CONTENT was left in place (deleting it would break
+      resolution outright). Point the host at its own resolver setup —
+      netplan/cloud-init/resolved will not regenerate the file on their own.
+  when: upstream_dns_servers | length == 0 and _upstream_dns_managed
+
+# ── Write path ────────────────────────────────────────────────────────────────
 - name: Lift the immutable bit on /etc/resolv.conf for the write
   ansible.builtin.file:
     path: /etc/resolv.conf
@@ -29,6 +68,7 @@
   changed_when: false
   # Missing file or a symlink (chattr does not apply to links): nothing to lift.
   failed_when: false
+  when: upstream_dns_servers | length > 0
 
 - name: Write static /etc/resolv.conf with the upstream resolvers
   ansible.builtin.copy:
@@ -44,26 +84,35 @@
       {% for ns in upstream_dns_servers %}
       nameserver {{ ns }}
       {% endfor %}
+      {% if upstream_dns_search | length > 0 %}
+      search {{ upstream_dns_search | join(' ') }}
+      {% endif %}
       options timeout:2 attempts:2
   register: _upstream_dns_resolv_conf
+  when: upstream_dns_servers | length > 0
 
 - name: Make /etc/resolv.conf immutable again
   ansible.builtin.file:
     path: /etc/resolv.conf
     attributes: "+i"
   changed_when: false
+  # Best effort: on a filesystem without chattr support the write above stands,
+  # the file is merely not protected against DHCP/cloud-init rewrites.
+  failed_when: false
+  when: upstream_dns_servers | length > 0
 
 - name: Check whether k3s is installed yet (CoreDNS can only be rolled then)
   ansible.builtin.stat:
     path: "{{ kubeconfig_root }}"
   register: _upstream_dns_kubeconfig
-  when: k3s_role == 'server'
+  when: k3s_role == 'server' and upstream_dns_servers | length > 0
 
 - name: Roll CoreDNS so it picks up the new resolv.conf # noqa: no-handler
   ansible.builtin.command:
     cmd: k3s kubectl --kubeconfig {{ kubeconfig_root }} -n kube-system rollout restart deployment/coredns
   when:
     - k3s_role == 'server'
+    - upstream_dns_servers | length > 0
     - _upstream_dns_resolv_conf is changed
     - _upstream_dns_kubeconfig.stat.exists
   changed_when: true

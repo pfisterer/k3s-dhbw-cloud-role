@@ -44,6 +44,11 @@ k3s_node_external_ip: ""
 # any beyond the third, CoreDNS would use them, and the two should not differ.
 upstream_dns_servers: []
 
+# Optional `search` domains for the managed /etc/resolv.conf. The static file
+# REPLACES whatever DHCP supplied, so a host that relies on short-name lookups
+# (internal mirrors, an OpenStack search domain) must restate them here.
+upstream_dns_search: []
+
 # -----------------------------------------------------------------------------
 ## 🩺 Preflight: inter-node overlay connectivity check
 # -----------------------------------------------------------------------------
