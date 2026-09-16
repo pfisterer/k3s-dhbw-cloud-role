@@ -339,6 +339,13 @@ cert_manager_namespace: cert-manager
 # cert-manager release notes for the versions being skipped.
 cert_manager_chart_version: "v1.20.3"
 
+# Comma-separated controller feature gates, passed to the chart's featureGates
+# value (empty = none, the chart then omits the flag entirely). Known use:
+# "ACMEUseARI=true" — RFC 9773 renewal hints, so the CA can pull a renewal
+# forward (e.g. after a revocation) instead of cert-manager only watching the
+# expiry date. Experimental upstream; enable per environment, staging first.
+cert_manager_feature_gates: ""
+
 # Set to dns01 or http01. dns01 (the default) requires the RFC2136 vars below
 # (rfc2136_zone / rfc2136_tsig_secret_value / rfc2136_tsig_secret_alg /
 # rfc2136_tsig_secret_keyname); if they are unset the ClusterIssuer silently

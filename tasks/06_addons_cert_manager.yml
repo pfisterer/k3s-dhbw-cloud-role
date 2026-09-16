@@ -53,6 +53,9 @@
         state: present
         values:
           installCRDs: true
+          # Empty string = the chart omits --feature-gates entirely (its
+          # template guards with `if .Values.featureGates`).
+          featureGates: "{{ cert_manager_feature_gates }}"
         wait: true
         atomic: true
 
