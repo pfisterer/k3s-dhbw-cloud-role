@@ -51,7 +51,7 @@ You run this role **from your own computer** (the "control node"); it configures
 
 **On the target host you need:**
 
-- A fresh **Linux** server (Ubuntu/Debian work well) that you can reach over SSH.
+- A fresh **Ubuntu or Debian** server that you can reach over SSH. The role installs packages with `apt`; `meta/main.yml` lists Ubuntu 22.04–26.04 and Debian 12–14. The server node should be **x86_64**, because kubectl and Skaffold are downloaded as `amd64` binaries.
 - A user with **sudo/root** rights (the playbook uses `become: true`).
 - Enough resources for k3s — see the official [k3s hardware requirements](https://docs.k3s.io/installation/requirements) (roughly 2 GB RAM / 2 vCPU as a baseline, plus whatever your workloads need).
 
@@ -83,6 +83,12 @@ Then install it:
 ansible-galaxy install -r requirements.yml
 ```
 
+The role uses modules from the **`kubernetes.core`** collection (Helm and Kubernetes objects). It is included in the full `ansible` package; if you only have `ansible-core`, install it separately:
+
+```bash
+ansible-galaxy collection install kubernetes.core
+```
+
 ---
 
 ## Usage
@@ -97,9 +103,9 @@ One host, full k3s server with all add-ons — the fastest way to get a working 
 ```yaml
 all:
   hosts:
-    "1.2.3.4":
+    "192.0.2.10":
       ansible_user: ubuntu
-      cert_manager_email: your@mail.com
+      cert_manager_email: you@example.org
 
       # DNS + automatic (wildcard) TLS — set these to enable ExternalDNS and DNS-01.
       # Without them you still get a working cluster, just no automatic DNS/HTTPS.
@@ -129,7 +135,7 @@ The run takes a few minutes (it installs k3s and all add-ons). When it finishes,
 
 **Step 3 — talk to your cluster:**
 ```bash
-export KUBECONFIG=./kubeconfig-1.2.3.4.yaml
+export KUBECONFIG=./kubeconfig-192.0.2.10.yaml
 kubectl get nodes          # should show your node as "Ready"
 ```
 
@@ -190,19 +196,19 @@ all:
           vars:
             k3s_role: server
           hosts:
-            "141.72.5.244":
+            "192.0.2.10":
               ansible_user: root
-              cert_manager_email: your@mail.com
+              cert_manager_email: you@example.org
               # ... all other role variables ...
 
         production_k3s_agent:
           vars:
             k3s_role: agent
-            k3s_server_host: "141.72.5.244"   # must match the server host above
+            k3s_server_host: "192.0.2.10"   # must match the server host above
           hosts:
-            "141.72.5.101":
+            "192.0.2.11":
               ansible_user: root
-            "141.72.5.102":
+            "192.0.2.12":
               ansible_user: root
 ```
 
@@ -218,12 +224,13 @@ all:
 
 The role detects each host's role via `k3s_role`. Server and agent tasks run in the same play — agent nodes automatically wait for the server to finish writing its join token before proceeding, so no manual ordering or token passing is needed.
 
-Run a single environment:
+If one inventory holds several environments (e.g. a `staging` group next to `production`), run one of them with `--limit`:
 
 ```bash
-ansible-playbook playbook.yml -i inventory.yml --limit staging
 ansible-playbook playbook.yml -i inventory.yml --limit production
 ```
+
+Before installing k3s on a multi-node run, the role checks that the flannel overlay port (VXLAN UDP `8472` by default) is reachable between every pair of nodes in both directions. Cloud security groups often allow SSH and ICMP but drop that UDP port; the cluster then looks healthy while cross-node pod traffic is silently lost, so the run stops early instead. See [Preflight (connectivity)](#preflight-connectivity).
 
 ---
 
@@ -243,7 +250,7 @@ The externally reachable IP is likewise taken from the address Ansible connects 
 "2001:db8::1":          # connect over the public IPv6 address
   ansible_user: root
   ip_family: ipv6       # force IPv6-only; ignore the private IPv4
-  cert_manager_email: your@mail.com
+  cert_manager_email: you@example.org
 ```
 
 The debug line `ip_family=auto → dual, primary=ipv4 ...` printed during the run shows what was detected — check it if the result is not what you expected. Valid values are `auto` (default), `ipv4`, `ipv6` and `dual`; for `dual`, `ip_family_primary` (`auto`/`ipv4`/`ipv6`) picks the primary family listed first in the CIDRs and `--node-ip`.
@@ -258,7 +265,7 @@ Notes:
 
 k3s' built-in **`local-path`** storage puts a volume in a directory on the node where the pod first starts, and pins it there. That is fine for a **single node**, but on a **multi-node** cluster it means no failover (a pod rescheduled to another node can't reach its data) and `ReadWriteOnce` only.
 
-So the role **enables Longhorn automatically on a multi-node cluster** (and leaves it off on a single node). Longhorn provides replicated, node-independent block storage with `RWO`/`RWX`, snapshots and backups. The role installs the required node packages (iSCSI/NFS) on every node and, by default, makes Longhorn the single default StorageClass (disabling `local-path`).
+So the role **enables Longhorn automatically on a multi-node cluster** (and leaves it off on a single node). Longhorn provides replicated, node-independent block storage with `RWO`/`RWX`, snapshots and backups. The role installs the required node packages (iSCSI/NFS) on every node, keeps `multipathd` (where it runs) away from the `/dev/sd*` devices Longhorn attaches, and, by default, makes Longhorn the single default StorageClass (disabling `local-path`).
 
 You can override the auto-detection and tune replication:
 
@@ -294,6 +301,33 @@ k3s_auto_upgrade_window_start: "02:00"  # only upgrade at night (see maintenance
 
 ---
 
+## Tags
+
+Every task file is included with its tags applied to the tasks inside, so a narrower run such as `--tags certmanager` really runs those tasks:
+
+| Tag                        | Runs                                                                                                             |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `preflight`, `python`      | Python bootstrap on a fresh host (`preflight` also covers the connectivity check)                               |
+| `bootstrap`                | Base packages, client tooling, Longhorn node prerequisites, kernel sysctls                                      |
+| `k3s`                      | Network settings, upstream DNS, connectivity check, k3s install, kubelet image GC                               |
+| `network`                  | Network settings, upstream DNS, connectivity check                                                              |
+| `upstream_dns`             | Only the `/etc/resolv.conf` management (`upstream_dns_servers`)                                                  |
+| `connectivity`             | Only the inter-node overlay connectivity check                                                                  |
+| `image_gc`                 | Only the kubelet image garbage collection drop-in                                                               |
+| `helm`                     | helm-diff plugin and Helm repositories (server only)                                                            |
+| `certmanager`              | cert-manager, ClusterIssuer, wildcard certificate, Traefik default TLS store (server only)                      |
+| `externaldns`              | ExternalDNS (server only)                                                                                       |
+| `longhorn`, `storage`      | Longhorn (server only, when enabled)                                                                            |
+| `upgrade`, `autoupgrade`   | system-upgrade-controller and upgrade Plans (server only, when enabled)                                         |
+
+```bash
+ansible-playbook playbook.yml -i inventory.yml --tags certmanager --check --diff
+```
+
+Check mode is usable against an existing cluster: the Python probe, the ClusterIssuer and ExternalDNS value renders (to `/tmp` and `/root`) and the system-upgrade-controller manifest downloads still run so later tasks can read them; nothing in the cluster is changed.
+
+---
+
 ## Variables
 
 All variables are defined in `defaults/main.yml` and can be overridden per host or group.
@@ -321,11 +355,21 @@ All variables are defined in `defaults/main.yml` and can be overridden per host 
 | `k3s_exec_args`         | `""`                        | Set to a non-empty string to **fully override** the dynamically computed k3s server install arguments. Empty = use the computed args.                                                                    |
 | `k3s_extra_exec_args`   | `""`                        | Extra arguments appended verbatim to the computed k3s server install arguments.                                                                                                                          |
 | `kubeconfig_root`       | `/etc/rancher/k3s/k3s.yaml` | Path to the kubeconfig on the server node.                                                                                                                                                               |
-| `kubeconfig_path`       | `""`                        | Where the server's kubeconfig is fetched on the control node (path + filename). Empty = default `./kubeconfig-<inventory_host>.yaml`. Set to a fixed path to always write/overwrite the same file.       |
+| `kubeconfig_path`       | `""`                        | Where the server's kubeconfig is fetched on the control node (path + filename), pointed at the reachable server address and written with mode `0600`. Empty = default `./kubeconfig-<inventory_host>.yaml` (`:` in IPv6 host names becomes `_`). Set to a fixed path to always write/overwrite the same file. |
+
+### Kubelet image garbage collection
+
+Applies to every node. The settings are written as a k3s drop-in (`/etc/rancher/k3s/config.yaml.d/10-image-gc.yaml`), so they also reach existing clusters; a change restarts `k3s`/`k3s-agent` once at the end of the run (on a single node the API server is briefly unavailable, containers keep running). Tag `image_gc`.
+
+| Variable                      | Default | Description                                                                                                                                                                  |
+| ----------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `k3s_image_gc_enabled`        | `true`  | Lower kubelet's image GC thresholds (upstream starts at 85 % disk usage). `false` removes the drop-in, reverting to kubelet's defaults.                                     |
+| `k3s_image_gc_high_threshold` | `75`    | Disk usage (percent) above which kubelet starts deleting unused images, oldest first.                                                                                       |
+| `k3s_image_gc_low_threshold`  | `65`    | Usage kubelet deletes down to. Keep it above what the node uses for everything that is not an image (volumes, logs, system), or kubelet can never reach it and keeps retrying. |
 
 ### Preflight (connectivity)
 
-Before installing k3s, the role checks that the flannel overlay port is reachable between all nodes in **both directions** — see the [connectivity preflight note](#multi-node-server--agents) above for why this matters.
+Before installing k3s, the role checks that the flannel overlay port is reachable between all nodes in **both directions** — see the [multi-node section](#multi-node-server--agents) above for why this matters.
 
 | Variable                       | Default | Description                                                                                                                                                                                            |
 | ------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -345,7 +389,7 @@ Before installing k3s, the role checks that the flannel overlay port is reachabl
 | `longhorn_data_locality`                        | `best-effort`     | Longhorn `default-data-locality`, applied both to the `longhorn` StorageClass and as the global default. `best-effort` keeps a replica on the node the volume is attached to so normal I/O never crosses the pod network — the value the Longhorn best practices recommend. `disabled` is the chart default; `strict-local` pins the single replica to the workload's node and is only for self-replicating applications. Applies to new volumes; existing ones keep the locality in their spec. |
 | `longhorn_node_drain_policy`                    | `block-for-eviction-if-contains-last-replica` | Longhorn `node-drain-policy`. The eviction default live-migrates the last replica off a node before allowing the drain, so the automatic k3s upgrades never hang — even for single-replica volumes. The Longhorn chart default (`block-if-contains-last-replica`) blocks the drain indefinitely; `always-allow` risks unavailability during drains. |
 | `longhorn_default_storage_class`                | `true`            | Make Longhorn the default StorageClass. When `true`, k3s' built-in `local-path` storage is disabled (`--disable=local-storage`) so Longhorn is the only default.                                                                                                                                                                                                                                                                                  |
-| `longhorn_storage_over_provisioning_percentage` | `300`             | How much storage Longhorn may reserve across all volumes, as a percentage of each node's disk. Longhorn reserves by requested PVC size, not bytes written, and volumes are thin-provisioned, so the total can safely exceed the physical disk. The chart default (`100`) is tight on the small lab VMs and makes storage-hungry workloads (e.g. the Apache Ozone lab) fail to schedule replicas. The default `300` gives generous headroom; lower it (e.g. `100`) to be conservative on nodes with larger disks. |
+| `longhorn_storage_over_provisioning_percentage` | `300`             | How much storage Longhorn may reserve across all volumes, as a percentage of each node's disk. Longhorn reserves by requested PVC size, not bytes written, and volumes are thin-provisioned, so the total can safely exceed the physical disk. The chart default (`100`) is tight on the small lab VMs and makes storage-hungry workloads fail to schedule replicas. The default `300` gives generous headroom; lower it (e.g. `100`) to be conservative on nodes with larger disks. |
 | `longhorn_orphan_resource_auto_deletion`        | `replica-data;instance` | Longhorn `orphan-resource-auto-deletion`: which orphaned resources Longhorn garbage-collects by itself. `replica-data` = replica directories no longer tracked by any volume, `instance` = engine/replica runtime instances left behind when an instance-manager dies (the stale entries that make a later attach fail with "connection refused"). Empty — the chart default — means orphans accumulate until removed by hand. The Helm key for this changed name between chart versions and unknown `defaultSettings` keys are silently ignored, so pin `longhorn_version`. |
 | `longhorn_orphan_resource_auto_deletion_grace_period` | `300`       | Seconds before an orphaned resource is deleted, so a merely-rebooting node has time to reclaim its replicas. Longhorn's own default, kept explicit as the safety margin on the setting above. |
 
@@ -369,11 +413,11 @@ Deployed on the **server node only**, and only when `k3s_auto_upgrade_enabled` i
 
 ### Bootstrap / client tooling
 
-These tools (Helm, kubectl, Skaffold, shell aliases and completions) are installed on the **server node only** — agents have no kubeconfig, so they would be unusable there.
+These tools (Helm, kubectl, Skaffold, the `python3-kubernetes` package, shell aliases and completions) are installed on the **server node only** — agents have no kubeconfig, so they would be unusable there.
 
 | Variable                         | Default  | Description                                                                                                      |
 | -------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
-| `bootstrap_install_client_tools` | `true`   | Install Helm, kubectl, Skaffold and the shell aliases/completions on the server. Set to `false` for a lean node. |
+| `bootstrap_install_client_tools` | `true`   | Install Helm, kubectl, Skaffold, `python3-kubernetes` and the shell aliases/completions on the server. Set to `false` for a lean node — but the add-on tasks use Helm and the Python Kubernetes client, so with `false` both must already be present on the server. |
 | `helm_version`                   | `""`     | Helm version to install. Empty = latest stable; pin a tag (e.g. `v3.16.3`) for reproducible installs.            |
 | `kubectl_version`                | `""`     | kubectl version to install. Empty = latest stable (`stable.txt`); pin a tag (e.g. `v1.31.4`).                    |
 | `skaffold_version`               | `latest` | Skaffold release to install (`latest` or a tag such as `v2.13.2`).                                               |
@@ -382,13 +426,15 @@ These tools (Helm, kubectl, Skaffold, shell aliases and completions) are install
 
 | Variable                                | Default                           | Description                                                                                                                                                                                                                  |
 | --------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cert_manager_email`                    | `""`                              | ACME account email. Leave empty to skip cert-manager installation.                                                                                                                                                           |
-| `cert_manager_url`                      | `https://certificates.dhbw.cloud` | ACME server URL.                                                                                                                                                                                                             |
+| `cert_manager_email`                    | `""`                              | ACME account email. Leave empty to skip cert-manager installation. A non-empty value must look like `mailbox@domain.tld` (asserted), since the CA rejects a malformed contact and cert-manager would retry forever.          |
+| `cert_manager_url`                      | `https://certificates.dhbw.cloud` | ACME server URL. The default is the DHBW ACME server, reachable from DHBW networks only.                                                                                                                                      |
 | `cert_manager_namespace`                | `cert-manager`                    | Deployment namespace.                                                                                                                                                                                                        |
+| `cert_manager_chart_version`            | `v1.21.2`                         | cert-manager Helm chart version, pinned so a run never upgrades cert-manager by accident. Raise it deliberately, after reading the release notes of the versions in between.                                                 |
+| `cert_manager_feature_gates`            | `ACMEUseARI=true`                 | Comma-separated controller feature gates (chart value `featureGates`; empty = none). `ACMEUseARI` lets cert-manager follow the CA's ACME renewal information (RFC 9773), so the CA can pull a renewal forward, e.g. after a revocation, instead of cert-manager only watching the expiry date. The gate is still experimental upstream; set `""` to opt out. |
 | `cert_manager_preferred_challenge`      | `dns01`                           | Challenge type: `dns01` or `http01`. `dns01` (default) needs the RFC2136 vars (see ExternalDNS) and uses the role-created TSIG secret; falls back to `http01` if they are unset.                                             |
 | `cert_manager_rfc2136_tsig_secret_name` | `cert-manager-rfc2136-tsig`       | Name of the Secret the role creates (in the cert-manager namespace) holding the RFC2136 TSIG key for the `dns01` solver.                                                                                                     |
 | `cert_manager_wildcard_secret_name`     | `wildcard-tls`                    | Name of the TLS Secret (in the Traefik namespace) holding the wildcard cert+key, and of the `Certificate` requesting it.                                                                                                      |
-| `cert_manager_wildcard_zone`            | `rfc2136_zone` while `dns01` is active, else `""` | Zone for the primary `*.<zone>` SAN, and the opt-in for the wildcard: empty means none is requested. Set it explicitly to get a wildcard **without** `dns01` — which only works where the CA issues one without a challenge because the domains are pre-validated on the ACME account. Over `http01` a wildcard cannot be validated and the Order retries forever. Deliberately separate from `rfc2136_zone`, which also gates the ExternalDNS installation. |
+| `cert_manager_wildcard_zone`            | `rfc2136_zone` while `dns01` is selected and `rfc2136_tsig_secret_value` is set, else `""` | Zone for the primary `*.<zone>` SAN, and the opt-in for the wildcard: empty means none is requested. Set it explicitly to get a wildcard **without** `dns01` — which only works where the CA issues one without a challenge because the domains are pre-validated on the ACME account. Over `http01` a wildcard cannot be validated and the Order retries forever. Deliberately separate from `rfc2136_zone`, which also gates the ExternalDNS installation. |
 | `cert_manager_wildcard_additional_dns_names` | `[]`                         | Further SANs on the same certificate, written out in full (e.g. `"*.apps.example.com"`) — for a deployment spanning more than one zone.                                                                                       |
 | `cert_manager_cluster_issuer_name`      | `certificate-cluster-issuer`      | Name of the ClusterIssuer this role creates. Reference it from your Ingress/IngressRoute (e.g. the `cert-manager.io/cluster-issuer` annotation).                                                                             |
 | `traefik_namespace`                     | `kube-system`                     | Namespace Traefik runs in (k3s bundles it in `kube-system`). The wildcard Secret and the default `TLSStore` are created here.                                                                                                |
@@ -429,10 +475,12 @@ After a successful run, the kubeconfig is fetched to the Ansible control node as
 ./kubeconfig-<hostname>.yaml
 ```
 
+The file is written with mode `0600` and points at the address Ansible connects through. For IPv6 host names `:` is replaced by `_`; set `kubeconfig_path` for a fixed name.
+
 Use it with:
 
 ```bash
-export KUBECONFIG=./kubeconfig-141.72.5.244.yaml
+export KUBECONFIG=./kubeconfig-192.0.2.10.yaml
 kubectl get nodes
 ```
 
@@ -441,6 +489,14 @@ kubectl get nodes
 ## Changelog
 
 This role uses calendar versioning (`YYYY.MM.DD`).
+
+### 2026.09.17
+
+**Changed**
+- **cert-manager chart default raised to `v1.21.2`** (was `v1.20.3`). Existing clusters are upgraded to it on the next run.
+
+**Added**
+- **`cert_manager_feature_gates`** (default `ACMEUseARI=true`) — controller feature gates passed to the chart. With ACME renewal information on, the CA can pull a renewal forward (e.g. after a revocation), so a revoked certificate is renewed instead of being served until it expires. Set it to `""` to opt out.
 
 ### 2026.08.31
 
@@ -452,12 +508,28 @@ This role uses calendar versioning (`YYYY.MM.DD`).
 - **`upstream_dns_search`** (default `[]`) — the static resolv.conf replaces DHCP's, so hosts that rely on a search domain restate it here.
 - Recovery note: when the host's current resolver is the broken thing, run `--tags upstream_dns` — the full play needs DNS (apt/curl) before it reaches these tasks.
 
+### 2026.08.28
 
 **Fixed**
 - **The kubeconfig on the server is no longer patched in place.** k3s rewrites `/etc/rancher/k3s/k3s.yaml` on every start, pointed at loopback, so the in-place rewrite to the node address was undone by the next restart and every later run reported it as changed — a permanent, meaningless diff. The rewrite now happens on the way to the control node only; the fetched file is unchanged in content, and is now written `0600`.
 
 **Added**
-- **`upstream_dns_servers`** (default `[]`) — the node's upstream resolvers, written to `/etc/resolv.conf` as a static, immutable file (a systemd-resolved symlink is replaced, `chattr +i` keeps cloud-init and DHCP hooks from rewriting it) and rolled into CoreDNS on an already-installed cluster. Empty leaves the host alone, so existing setups are unchanged. Cloud images ship a single DHCP-supplied or hand-edited resolver, and CoreDNS (`forward . /etc/resolv.conf`) can only fail over between resolvers it can see; on 2026-08-27 the path to that one resolver flapped for nine hours and took every external-name lookup on the cluster with it. Tag `upstream_dns`.
+- **`upstream_dns_servers`** (default `[]`) — the node's upstream resolvers, written to `/etc/resolv.conf` as a static, immutable file (a systemd-resolved symlink is replaced, `chattr +i` keeps cloud-init and DHCP hooks from rewriting it) and rolled into CoreDNS on an already-installed cluster. Empty leaves the host alone, so existing setups are unchanged. Cloud images ship a single DHCP-supplied or hand-edited resolver, and CoreDNS (`forward . /etc/resolv.conf`) can only fail over between resolvers it can see, so a flapping path to that one resolver takes every external-name lookup on the cluster with it. Tag `upstream_dns`.
+
+### 2026.08.27
+
+**Added**
+- **Kubelet image garbage collection starts earlier** (`k3s_image_gc_enabled`, `k3s_image_gc_high_threshold` `75`, `k3s_image_gc_low_threshold` `65`; upstream starts at 85 %). Written as a k3s `config.yaml.d` drop-in rather than install arguments, so existing clusters get it too; applying it restarts k3s once. `k3s_image_gc_enabled: false` removes the drop-in. Tag `image_gc`.
+
+### 2026.08.26
+
+**Fixed**
+- The helm-diff plugin is only installed when it is missing, so check runs no longer report it as changed every time.
+
+### 2026.08.25
+
+**Fixed**
+- **`--check` runs no longer abort.** The Python probe, the ClusterIssuer and ExternalDNS value renders and the system-upgrade-controller manifest downloads now also run in check mode (reported as unchanged), so later tasks find their input and e.g. `--tags certmanager --check --diff` works.
 
 ### 2026.08.17
 
@@ -470,6 +542,32 @@ This role uses calendar versioning (`YYYY.MM.DD`).
 
 **Added**
 - **`cert_manager_wildcard_additional_dns_names`** (default `[]`) — further SANs on the same certificate, written out in full, for a deployment that spans more than one zone (e.g. `*.example.com` plus `*.apps.example.com`). The primary `*.<zone>` SAN stays first, so an existing certificate is not reissued.
+
+### 2026.08.12
+
+**Changed**
+- **cert-manager chart version pinned** (`cert_manager_chart_version`, then `v1.20.3`). Previously every run installed the newest chart, so clusters built at different times drifted apart and a run could jump several minor versions.
+
+### 2026.08.03
+
+**Added**
+- **`longhorn_data_locality`** (default `best-effort`) — keeps a replica on the node the volume is attached to; applies to new volumes.
+- **`longhorn_orphan_resource_auto_deletion`** (default `replica-data;instance`) and **`longhorn_orphan_resource_auto_deletion_grace_period`** (default `300`) — Longhorn cleans up orphaned replica data and instances itself.
+- On Longhorn nodes where `multipathd` runs, a drop-in blacklists `/dev/sd*` devices so it cannot claim Longhorn's iSCSI volumes (which otherwise fail to mount).
+
+### 2026.07.30
+
+**Changed**
+- **ExternalDNS image raised to `v0.21.0`** (older versions crash-loop on a transient AXFR failure) and the chart version pinned via the new `external_dns_chart_version` (`1.21.1`).
+- New **`external_dns_interval`** (default `5m`) and **`external_dns_trigger_loop_on_event`** (default `true`): every reconciliation is a full zone transfer, so the interval is longer, while `--events` keeps record creation fast.
+
+**Fixed**
+- ExternalDNS sources are set through the chart's `sources` key; before, the chart default stayed active, silently enabling the `service` source and passing `ingress` twice.
+
+### 2026.07.24
+
+**Fixed**
+- `cert_manager_email` is validated before cert-manager is configured; a malformed address used to produce a ClusterIssuer that retried `invalidContact` forever. The check uses the `match` test so it also works on ansible-core 2.19 (2026-07-29).
 
 ### 2026.07.04
 
@@ -485,7 +583,7 @@ This role uses calendar versioning (`YYYY.MM.DD`).
 - **Automatic k3s upgrades via Rancher's [system-upgrade-controller](https://docs.k3s.io/upgrades/automated) — on by default (`k3s_auto_upgrade_enabled`).** The server node deploys the controller plus two upgrade Plans (server + agent); the controller cordons each node in turn, swaps the k3s binary and restarts the service — a controlled rolling upgrade, servers before agents (`concurrency: 1`). Track a release channel (`k3s_auto_upgrade_channel`, default `stable` → auto-detects new releases) or pin one exact release (`k3s_auto_upgrade_version`, overrides the channel). Agent nodes drain by default (`k3s_auto_upgrade_drain`); servers are always cordon-only. Upgrades run only inside a nightly maintenance window (`k3s_auto_upgrade_window_*`, default `02:00`–`04:00` `Europe/Berlin`) so the unavoidable brief downtime on a single node lands at night; disable the window (`k3s_auto_upgrade_window_enabled: false`) to upgrade immediately. Set `k3s_auto_upgrade_enabled: false` to opt out. Verified end-to-end on a 3-node cluster (v1.35.6 → v1.36.2).
 
 **Fixed**
-- **`kubernetes` Python client is now installed via pip (`>=24.2.0`) instead of apt.** The `python3-kubernetes` apt package on Ubuntu is capped at ~22.x, which made the `kubernetes.core` collection warn `kubernetes<24.2.0 is not supported or tested`. The server node now installs a current client with pip (using the module's `break_system_packages` for PEP 668), so the warning is gone and the client stays on a supported version.
+- **`kubernetes` Python client briefly installed via pip, reverted the same day.** The pip install pulled a PyYAML upgrade over the distribution's package and broke the server bootstrap, so the role is back on the `python3-kubernetes` apt package; the `kubernetes<24.2.0 is not supported or tested` warning from `kubernetes.core` is harmless.
 
 **Changed**
 - **`ip_family` now defaults to `auto` and is detected from the host** (was hardcoded `ipv4`). Auto-detection reads the interface default-route addresses: both families present → `dual`, only IPv6 → `ipv6`, otherwise `ipv4`; `ip_family_primary` also defaults to `auto` (the family Ansible connects over). A resolved-family `debug` line is printed during the run. Explicit `ipv4`/`ipv6`/`dual` values keep working unchanged.
@@ -497,7 +595,7 @@ This role uses calendar versioning (`YYYY.MM.DD`).
 ### 2026.06.24
 
 **Added**
-- **Configurable Longhorn over-provisioning (`longhorn_storage_over_provisioning_percentage`, default `300`).** Sets Longhorn's `storageOverProvisioningPercentage` (in `tasks/08_addons_longhorn.yml`). Longhorn reserves disk by requested PVC size (not bytes written) and its volumes are thin-provisioned, so the reserved total can safely exceed the physical disk. The chart default of `100` is tight on the small lab VMs and made storage-hungry workloads (notably the Apache Ozone lab, which requests several volumes) fail to schedule replicas with "insufficient storage". The default of `300` gives generous headroom; the 25%-minimal-available guard still prevents a disk from actually filling. Lower it (e.g. `100`) to be conservative on nodes with larger disks.
+- **Configurable Longhorn over-provisioning (`longhorn_storage_over_provisioning_percentage`, default `300`).** Sets Longhorn's `storageOverProvisioningPercentage` (in `tasks/08_addons_longhorn.yml`). Longhorn reserves disk by requested PVC size (not bytes written) and its volumes are thin-provisioned, so the reserved total can safely exceed the physical disk. The chart default of `100` is tight on the small lab VMs and made storage-hungry workloads (several volumes per workspace) fail to schedule replicas with "insufficient storage". The default of `300` gives generous headroom; the 25%-minimal-available guard still prevents a disk from actually filling. Lower it (e.g. `100`) to be conservative on nodes with larger disks.
 
 ### 2026.06.11
 
