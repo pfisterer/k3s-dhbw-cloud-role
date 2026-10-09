@@ -404,6 +404,17 @@ cert_manager_wildcard_zone: >-
 # "*.apps.example.com"). For a deployment that spans more than one zone: the
 # primary "*.<cert_manager_wildcard_zone>" plus these, in one certificate.
 cert_manager_wildcard_additional_dns_names: []
+
+# Zones from rfc2136_additional_zones whose "*.<zone>" joins the wildcard
+# certificate. Derived, like cert_manager_wildcard_zone: only while dns01 runs
+# for the primary zone, because only then does each of those zones have a
+# solver that can validate its wildcard. Entries with `state: absent` are left
+# out. Override with an explicit list of zone names if needed.
+cert_manager_wildcard_additional_zones: >-
+  {{ (rfc2136_additional_zones | default([]) | rejectattr('state', 'defined') | map(attribute='zone') | list)
+     + (rfc2136_additional_zones | default([]) | selectattr('state', 'defined') | selectattr('state', '==', 'present') | map(attribute='zone') | list)
+     if (cert_manager_wildcard_zone | length > 0 and cert_manager_preferred_challenge == 'dns01'
+         and (rfc2136_tsig_secret_value | default('')) | length > 0) else [] }}
 #
 # Name of the TLS Secret holding the wildcard cert+key. Created by cert-manager
 # in traefik_namespace so Traefik (and the default TLSStore) can read it.
@@ -476,3 +487,31 @@ external_dns_exclude_target_nets:
 # rfc2136_tsig_secret_value: some_value
 # rfc2136_tsig_secret_alg: hmac-sha512
 # rfc2136_tsig_secret_keyname: user-key-xxxx
+
+# Further zones ExternalDNS publishes into, next to rfc2136_zone. Empty (the
+# default) changes nothing: one ExternalDNS release, one TSIG secret, the same
+# ClusterIssuer and wildcard certificate as before.
+#
+# Each entry carries its OWN TSIG key, because the DHBW zone service issues one
+# key per zone (and owner) — a key of one zone cannot update another. ExternalDNS
+# takes exactly one TSIG key per instance, so every further zone gets its own
+# release "external-dns-<zone with dashes>" in external_dns_namespace, filtered
+# to that zone. cert-manager gets one more dns01 solver per zone, selected by
+# dnsZones, so certificates for names in that zone are validated with its key.
+# While dns01 is active, "*.<zone>" is added to the wildcard certificate.
+#
+# rfc2136_zone stays the primary zone and the gate for ExternalDNS as a whole;
+# further zones are only deployed when it is set. Same RFC2136 server
+# (rfc2136_dns_host/port) for all zones.
+#
+# To retire a zone, set `state: absent` for one run: that uninstalls its release
+# and TSIG secret and drops its solver and SAN. Merely deleting the entry leaves
+# the release running.
+#
+# rfc2136_additional_zones:
+#   - zone: other-zone.example.com
+#     tsig_secret_value: some_value
+#     tsig_secret_keyname: user-key-yyyy
+#     tsig_secret_alg: hmac-sha512   # optional, defaults to rfc2136_tsig_secret_alg
+#     state: present                 # optional, present | absent
+rfc2136_additional_zones: []

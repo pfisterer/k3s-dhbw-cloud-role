@@ -3,6 +3,15 @@
 - name: Addons Deployment
   when: cert_manager_email is defined and cert_manager_email != ""
   become: true
+  vars:
+    # SANs of the wildcard certificate: the primary "*.<zone>" first (its
+    # position is what keeps an existing certificate from being reissued), then
+    # further zones, then explicitly listed names. Parentheses matter: a Jinja
+    # filter binds tighter than `+`.
+    _wildcard_dns_names: >-
+      {{ (['*.' ~ cert_manager_wildcard_zone]
+          + (cert_manager_wildcard_additional_zones | map('regex_replace', '^', '*.') | list)
+          + cert_manager_wildcard_additional_dns_names) | unique }}
   block:
     # --- Fail fast on a malformed address. The block guard above only checks
     # that cert_manager_email is non-empty; a non-empty but invalid value (e.g.
@@ -96,6 +105,29 @@
           data:
             secret: "{{ rfc2136_tsig_secret_value | b64encode }}"
 
+    # --- One TSIG secret per further zone (rfc2136_additional_zones), each zone
+    # has its own key. The ClusterIssuer below references them from a dns01
+    # solver per zone. `state: absent` removes the secret again.
+    - name: Create RFC2136 TSIG secrets for further zones
+      when:
+        - cert_manager_preferred_challenge == 'dns01'
+        - rfc2136_tsig_secret_value | default('') | length > 0
+      loop: "{{ rfc2136_additional_zones | default([]) }}"
+      loop_control:
+        label: "{{ item.zone }}"
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_root }}"
+        state: "{{ item.state | default('present') }}"
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ cert_manager_rfc2136_tsig_secret_name }}-{{ item.zone | replace('.', '-') }}"
+            namespace: "{{ cert_manager_namespace }}"
+          type: Opaque
+          data:
+            secret: "{{ item.tsig_secret_value | b64encode }}"
+
     # --- ClusterIssuer
     - name: Render ClusterIssuer template
       ansible.builtin.template:
@@ -130,10 +162,7 @@
     # "*.<zone>" plus any cert_manager_wildcard_additional_dns_names replaces the
     # per-host certs; cert-manager stores cert+key in a TLS Secret in the Traefik
     # namespace.
-    # Parentheses matter: a Jinja filter binds tighter than `+`, so without them
-    # join() would be applied to the additional names alone and then added to a
-    # list — a type error rather than a string.
-    - name: Request wildcard certificate ({{ (['*.' ~ cert_manager_wildcard_zone] + cert_manager_wildcard_additional_dns_names) | join(', ') }})
+    - name: Request wildcard certificate ({{ _wildcard_dns_names | join(', ') }})
       when: &wildcard_active
         - cert_manager_wildcard_zone | default('') | length > 0
       kubernetes.core.k8s:
@@ -147,9 +176,7 @@
             namespace: "{{ traefik_namespace }}"
           spec:
             secretName: "{{ cert_manager_wildcard_secret_name }}"
-            # Primary SAN first: it is the one derived from the zone, and the
-            # order is what keeps an existing certificate from being reissued.
-            dnsNames: "{{ ['*.' ~ cert_manager_wildcard_zone] + cert_manager_wildcard_additional_dns_names }}"
+            dnsNames: "{{ _wildcard_dns_names }}"
             issuerRef:
               name: "{{ cert_manager_cluster_issuer_name }}"
               kind: ClusterIssuer

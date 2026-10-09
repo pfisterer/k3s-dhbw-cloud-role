@@ -5,6 +5,19 @@
   become: true
   vars:
     external_dns_values_file: /root/external_dns_values.yaml
+    # The primary zone first (index 0), then the further zones. Keys of the
+    # primary entry mirror those of rfc2136_additional_zones.
+    _external_dns_zones: >-
+      {{ [{'zone': rfc2136_zone,
+           'tsig_secret_value': rfc2136_tsig_secret_value,
+           'tsig_secret_alg': rfc2136_tsig_secret_alg,
+           'tsig_secret_keyname': rfc2136_tsig_secret_keyname}]
+         + (rfc2136_additional_zones | default([])) }}
+    # Per loop item (_edns, _edns_idx) in the two tasks below.
+    _edns_release: "{{ 'external-dns' if _edns_idx == 0 else 'external-dns-' ~ (_edns.zone | replace('.', '-')) }}"
+    _edns_values_file: >-
+      {{ external_dns_values_file if _edns_idx == 0
+         else '/root/external_dns_values-' ~ (_edns.zone | replace('.', '-')) ~ '.yaml' }}
   block:
     # --- Namespace
     - name: Ensure external-dns namespace exists
@@ -17,27 +30,57 @@
             name: "{{ external_dns_namespace }}"
         kubeconfig: "{{ kubeconfig_root }}"
 
-    - name: Render external-dns Helm values file
+    # --- One release per zone. ExternalDNS takes exactly one TSIG key, and the
+    # DHBW zone service issues one key per zone, so every further zone from
+    # rfc2136_additional_zones runs as its own release. The primary zone keeps
+    # the release name "external-dns" and the values file it always had, so an
+    # existing cluster sees no change. Further zones: "external-dns-<zone with
+    # dashes>" and a values file of the same suffix.
+    - name: Check that release names for further zones fit Helm's limit
+      ansible.builtin.assert:
+        that:
+          - ('external-dns-' ~ (item.zone | replace('.', '-'))) | length <= 53
+        fail_msg: >-
+          The ExternalDNS release for {{ item.zone }} would be named
+          external-dns-{{ item.zone | replace('.', '-') }}, longer than Helm's
+          53 characters.
+        quiet: true
+      loop: "{{ rfc2136_additional_zones | default([]) }}"
+      loop_control:
+        label: "{{ item.zone }}"
+
+    - name: Render external-dns Helm values files
       ansible.builtin.template:
         src: external_dns_values.yaml.j2
-        dest: "{{ external_dns_values_file }}"
+        dest: "{{ _edns_values_file }}"
         owner: root
         group: root
         mode: "0600"
+      loop: "{{ _external_dns_zones }}"
+      loop_control:
+        loop_var: _edns
+        index_var: _edns_idx
+        label: "{{ _edns.zone }}"
+      when: _edns.state | default('present') == 'present'
       # Renders in --check too: the helm task below reads this file back, and a
       # check run that skipped the render fails on the missing values file. Same
       # exception as the ClusterIssuer render — see 06_addons_cert_manager.yml.
       check_mode: false
       changed_when: false
 
-    - name: Install or upgrade External-DNS
+    - name: Install, upgrade or remove External-DNS
       kubernetes.core.helm:
-        name: external-dns
+        name: "{{ _edns_release }}"
         chart_ref: external-dns/external-dns
         chart_version: "{{ external_dns_chart_version or omit }}"
         release_namespace: "{{ external_dns_namespace }}"
         kubeconfig: "{{ kubeconfig_root }}"
-        state: present
-        values_files: "{{ external_dns_values_file }}"
+        state: "{{ _edns.state | default('present') }}"
+        values_files: "{{ omit if _edns.state | default('present') == 'absent' else [_edns_values_file] }}"
         wait: true
-        atomic: true
+        atomic: "{{ _edns.state | default('present') == 'present' }}"
+      loop: "{{ _external_dns_zones }}"
+      loop_control:
+        loop_var: _edns
+        index_var: _edns_idx
+        label: "{{ _edns.zone }}"

@@ -40,6 +40,22 @@ spec:
                     tsigSecretSecretRef:
                         name: "{{ cert_manager_rfc2136_tsig_secret_name }}" # k8s Secret with the TSIG key, created in 06_addons_cert_manager.yml
                         key: secret
+{% for z in rfc2136_additional_zones | default([]) if z.state | default('present') == 'present' %}
+            # Further zone {{ z.zone }}: its own TSIG key. dnsZones makes
+            # cert-manager prefer this solver for names in that zone over the
+            # selector-less one above.
+            - selector:
+                dnsZones:
+                    - "{{ z.zone }}"
+              dns01:
+                rfc2136:
+                    nameserver: "{{ ('[' + rfc2136_dns_host + ']') if ':' in rfc2136_dns_host else rfc2136_dns_host }}:{{ rfc2136_dns_port }}"
+                    tsigKeyName: "{{ z.tsig_secret_keyname }}"
+                    tsigAlgorithm: "{{ (z.tsig_secret_alg | default(rfc2136_tsig_secret_alg)) | replace('-', '') | upper }}"
+                    tsigSecretSecretRef:
+                        name: "{{ cert_manager_rfc2136_tsig_secret_name }}-{{ z.zone | replace('.', '-') }}"
+                        key: secret
+{% endfor %}
 {% else %}
             - http01:
                 ingress:

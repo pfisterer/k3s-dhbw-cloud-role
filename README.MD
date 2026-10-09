@@ -176,6 +176,22 @@ What happens automatically:
 
 Need a **dedicated** (non-wildcard) certificate for a host? Add the annotation `cert-manager.io/cluster-issuer: certificate-cluster-issuer` and a `secretName` to the `tls` entry, and cert-manager issues one just for that host.
 
+### More than one zone
+
+A cluster can publish into further zones next to `rfc2136_zone`, e.g. while moving services to a new zone or when one cluster serves two zones. Every zone needs its own TSIG key — the DHBW zone service issues one key per zone — so each further zone is listed with its key:
+
+```yaml
+rfc2136_additional_zones:
+  - zone: other-zone.example.com
+    tsig_secret_value: "<TSIG key of that zone>"
+    tsig_secret_keyname: "<its key name>"
+    # tsig_secret_alg: hmac-sha512   # optional, defaults to rfc2136_tsig_secret_alg
+```
+
+For each entry the role installs one more ExternalDNS release (`external-dns-other-zone-example-com`, filtered to that zone), adds a cert-manager dns01 solver selected by `dnsZones` with that zone's key, and adds `*.other-zone.example.com` to the wildcard certificate. An Ingress may then list hosts from both zones. Without the variable nothing changes: the `external-dns` release, the ClusterIssuer and the certificate stay exactly as they were.
+
+To retire a zone, set `state: absent` on its entry for one run (removes its release and TSIG secret, drops its solver and SAN), then delete the entry. Deleting the entry right away leaves its release running.
+
 ---
 
 ### Multi-node (server + agents)
@@ -436,6 +452,7 @@ These tools (Helm, kubectl, Skaffold, the `python3-kubernetes` package, shell al
 | `cert_manager_wildcard_secret_name`     | `wildcard-tls`                    | Name of the TLS Secret (in the Traefik namespace) holding the wildcard cert+key, and of the `Certificate` requesting it.                                                                                                      |
 | `cert_manager_wildcard_zone`            | `rfc2136_zone` while `dns01` is selected and `rfc2136_tsig_secret_value` is set, else `""` | Zone for the primary `*.<zone>` SAN, and the opt-in for the wildcard: empty means none is requested. Set it explicitly to get a wildcard **without** `dns01` — which only works where the CA issues one without a challenge because the domains are pre-validated on the ACME account. Over `http01` a wildcard cannot be validated and the Order retries forever. Deliberately separate from `rfc2136_zone`, which also gates the ExternalDNS installation. |
 | `cert_manager_wildcard_additional_dns_names` | `[]`                         | Further SANs on the same certificate, written out in full (e.g. `"*.apps.example.com"`) — for a deployment spanning more than one zone.                                                                                       |
+| `cert_manager_wildcard_additional_zones` | zones of `rfc2136_additional_zones` (not `absent`) while `dns01` is active, else `[]` | Zones whose `*.<zone>` is added to the wildcard certificate, after the primary SAN.                                                                                       |
 | `cert_manager_cluster_issuer_name`      | `certificate-cluster-issuer`      | Name of the ClusterIssuer this role creates. Reference it from your Ingress/IngressRoute (e.g. the `cert-manager.io/cluster-issuer` annotation).                                                                             |
 | `traefik_namespace`                     | `kube-system`                     | Namespace Traefik runs in (k3s bundles it in `kube-system`). The wildcard Secret and the default `TLSStore` are created here.                                                                                                |
 | `cert_manager_private_key_secret_name`  | `cert-manager-private-key-secret` | Secret name for the ACME account private key (`privateKeySecretRef`).                                                                                                                                                        |
@@ -455,6 +472,7 @@ These tools (Helm, kubectl, Skaffold, the `python3-kubernetes` package, shell al
 | `rfc2136_tsig_secret_value`        | _(unset)_                        | TSIG secret value.                                                                                                                  |
 | `rfc2136_tsig_secret_alg`          | _(unset)_                        | TSIG algorithm (e.g. `hmac-sha512`).                                                                                                |
 | `rfc2136_tsig_secret_keyname`      | _(unset)_                        | TSIG key name.                                                                                                                      |
+| `rfc2136_additional_zones`         | `[]`                             | Further zones next to `rfc2136_zone`, each with its own TSIG key (`zone`, `tsig_secret_value`, `tsig_secret_keyname`, optional `tsig_secret_alg`, optional `state: present\|absent`). Each gets its own ExternalDNS release, a dns01 solver and a wildcard SAN. See [More than one zone](#more-than-one-zone). |
 | `external_dns_namespace`           | `external-dns`                   | Namespace ExternalDNS is deployed into.                                                                                             |
 | `external_dns_log_level`           | `debug`                          | ExternalDNS log level.                                                                                                              |
 | `external_dns_txt_owner_id`        | `dynamic-zones-dns`              | Owner ID written into the registry TXT records. Make this unique per cluster when several clusters share a zone.                    |
@@ -489,6 +507,11 @@ kubectl get nodes
 ## Changelog
 
 This role uses calendar versioning (`YYYY.MM.DD`).
+
+### 2026.10.09
+
+**Added**
+- **`rfc2136_additional_zones`** (default `[]`) — further DNS zones next to `rfc2136_zone`, each with its own TSIG key. Per zone: one more ExternalDNS release, a dns01 solver selected by `dnsZones`, and `*.<zone>` on the wildcard certificate (via the derived `cert_manager_wildcard_additional_zones`). A separate release per zone because ExternalDNS takes one TSIG key per instance and the DHBW zone service issues one key per zone. `state: absent` on an entry removes it again. **Nothing changes for existing configurations:** with the list empty the release, the ClusterIssuer and the certificate render exactly as before.
 
 ### 2026.09.17
 
