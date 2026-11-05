@@ -86,18 +86,30 @@
       retries: 30
       delay: 5
 
+    # The Plans are replaced, not merged: drain, window and version/channel are only in the spec when enabled, and a merge would leave a switched-off one behind. A replace needs the current resourceVersion.
+    - name: Read the current upgrade Plans
+      kubernetes.core.k8s_info:
+        api_version: upgrade.cattle.io/v1
+        kind: Plan
+        namespace: "{{ system_upgrade_namespace }}"
+        kubeconfig: "{{ kubeconfig_root }}"
+      register: _suc_plans
+
+    - name: Note the resourceVersion of each Plan
+      ansible.builtin.set_fact:
+        _suc_plan_versions: "{{ dict(_suc_plans.resources | map(attribute='metadata.name') | zip(_suc_plans.resources | map(attribute='metadata.resourceVersion'))) }}"
+
     # --- Server Plan. Targets control-plane nodes; cordon-only (draining a
     # control-plane node would evict the controller itself / deadlock a single node).
     - name: Deploy the server upgrade Plan
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_root }}"
         state: present
+        force: true
         definition:
           apiVersion: upgrade.cattle.io/v1
           kind: Plan
-          metadata:
-            name: server-plan
-            namespace: "{{ system_upgrade_namespace }}"
+          metadata: "{{ {'name': 'server-plan', 'namespace': system_upgrade_namespace} | combine({'resourceVersion': _suc_plan_versions['server-plan']} if 'server-plan' in _suc_plan_versions else {}) }}"
           spec: "{{ _server_plan_spec | combine(_k3s_upgrade_source, _upgrade_window) }}"
       vars:
         _server_plan_spec:
@@ -119,12 +131,11 @@
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_root }}"
         state: present
+        force: true
         definition:
           apiVersion: upgrade.cattle.io/v1
           kind: Plan
-          metadata:
-            name: agent-plan
-            namespace: "{{ system_upgrade_namespace }}"
+          metadata: "{{ {'name': 'agent-plan', 'namespace': system_upgrade_namespace} | combine({'resourceVersion': _suc_plan_versions['agent-plan']} if 'agent-plan' in _suc_plan_versions else {}) }}"
           spec: "{{ _agent_plan_spec | combine(_agent_plan_drain, _k3s_upgrade_source, _upgrade_window) }}"
       vars:
         _agent_plan_spec:
@@ -135,6 +146,8 @@
               - key: node-role.kubernetes.io/control-plane
                 operator: DoesNotExist
           serviceAccountName: system-upgrade
+          # Tainted agents (GPU, build nodes) are upgraded too; the job only swaps the k3s binary.
+          tolerations: "{{ k3s_auto_upgrade_tolerations }}"
           prepare:
             image: rancher/k3s-upgrade
             args: ["prepare", "server-plan"]

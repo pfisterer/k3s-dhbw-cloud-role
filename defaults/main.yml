@@ -168,6 +168,10 @@ k3s_auto_upgrade_version: ""
 # the upgrade controller itself and, on a single node, deadlock the upgrade.
 k3s_auto_upgrade_drain: true
 
+# Tolerations of the agent upgrade jobs. Default: every taint, so nodes reserved for GPU or build workloads are upgraded as well; without it their jobs stay Pending and the agent Plan never gets past them.
+k3s_auto_upgrade_tolerations:
+  - operator: Exists
+
 # Maintenance window: only start upgrade jobs inside this time range. Strongly
 # recommended when downtime is unavoidable (e.g. a single node, where every
 # upgrade briefly takes the cluster down) so it happens at night, not mid-day.
@@ -194,9 +198,8 @@ k3s_auto_upgrade_window_timezone: "Europe/Berlin"
 # it and the matching "system-upgrade" ServiceAccount the Plans reference).
 system_upgrade_namespace: system-upgrade
 
-# system-upgrade-controller release to install. "latest" tracks the newest GitHub
-# release; pin a tag (e.g. "v0.16.0") for reproducible installs.
-system_upgrade_controller_version: "latest"
+# system-upgrade-controller release to install. Pinned, so a role run does not upgrade the controller on the side; "latest" tracks the newest GitHub release.
+system_upgrade_controller_version: "v0.21.0"
 
 # -----------------------------------------------------------------------------
 ## 🧰 Bootstrap: client / developer tooling
