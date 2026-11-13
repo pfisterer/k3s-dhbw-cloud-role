@@ -286,3 +286,23 @@
     cmd: sysctl --system
   when: _k3s_sysctl_file is changed
   changed_when: false
+
+# Ubuntu 26.04 sets kernel.apparmor_restrict_unprivileged_unconfined=1. With the kernels from 7.0.0-42 on, runc's profile change then becomes a stack and every container runs as cri-containerd.apparmor.d//&unconfined; containerd's default profile grants signals only to the plain name, so processes in a container cannot signal each other (kill: Permission denied; Jupyter cannot interrupt or end a kernel, PostgreSQL never finishes recovery). Found on the KI cluster's CPU workers 13.11.2026; upstream containerd#14485, fix in containerd PR #14487, not in a k3s release yet. Setting it to 0 brings back the plain label; containers stay confined by containerd's profile, only Ubuntu's host-side hardening against unconfined processes in user namespaces is relaxed. The leading "-" makes sysctl skip the key on kernels without it. Remove once k3s ships the containerd fix.
+- name: Let processes in a container signal each other under AppArmor (Ubuntu 26.04)
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-k3s-apparmor-containerd.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by k3s-dhbw-cloud-role (tasks/02_bootstrap.yml): containerd#14485, remove once k3s ships the fix.
+      -kernel.apparmor_restrict_unprivileged_unconfined = 0
+  register: _k3s_apparmor_sysctl
+
+- name: Apply the AppArmor sysctl when it changed # noqa: no-handler
+  become: true
+  ansible.builtin.command:
+    cmd: sysctl -p /etc/sysctl.d/99-k3s-apparmor-containerd.conf
+  when: _k3s_apparmor_sysctl is changed
+  changed_when: false
