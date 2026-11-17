@@ -6,54 +6,82 @@
 # peer. Looping this over all nodes (in 03b_connectivity_check.yml) covers both
 # directions, because each node is the destination exactly once.
 
-# Skip the round when _probe_dest already runs k3s: flannel holds the overlay
-# port, so the listener can't bind it (EADDRINUSE) — and a running cluster
-# already proves the port works. This makes the check a true pre-install gate
-# that no-ops on re-runs, while a fresh node added to an existing cluster is
-# still probed as a destination (existing peers reach it).
-- name: "Check whether k3s already holds the overlay port on {{ _probe_dest }}"
-  ansible.builtin.stat:
-    path: /usr/local/bin/k3s
+# Skip the round only while the destination's k3s service is active: its flannel
+# process owns the overlay port, so the cooperative listener cannot bind it.
+# Merely finding the k3s binary is insufficient because the service may be
+# stopped; in that case the preflight can and should run.
+- name: "Check whether k3s is active on {{ _probe_dest }}"
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - --quiet
+      - "{{ 'k3s.service' if (hostvars[_probe_dest].k3s_role | default('server')) == 'server' else 'k3s-agent.service' }}"
   delegate_to: "{{ _probe_dest }}"
-  register: _dest_k3s
+  register: _dest_k3s_service
+  changed_when: false
+  failed_when: false
 
-- name: "Skip: k3s already installed (overlay port in use) {{ _probe_dest }}"
+- name: "Skip: k3s is active (overlay port in use) {{ _probe_dest }}"
   ansible.builtin.debug:
     msg: >-
-      {{ _probe_dest }} already runs k3s — flannel holds UDP {{ _flannel_overlay_port }},
-      so the live overlay already proves it. Skipping the probe into this node.
-  when: _dest_k3s.stat.exists
+      {{ _probe_dest }} has an active k3s service, so flannel owns UDP
+      {{ _flannel_overlay_port }} and the pre-install listener cannot bind it.
+      Skipping the probe into this node.
+  when: _dest_k3s_service.rc == 0
 
 - name: "Probe overlay reachability into {{ _probe_dest }}"
-  when: not _dest_k3s.stat.exists
+  when: _dest_k3s_service.rc != 0
+  vars:
+    _expected: "{{ ansible_play_hosts | difference([_probe_dest]) }}"
+    _listener_ready_file: "/tmp/udp_probe_{{ _flannel_overlay_port }}.ready"
   block:
+    - name: "Remove stale listener readiness marker on {{ _probe_dest }}"
+      ansible.builtin.file:
+        path: "{{ _listener_ready_file }}"
+        state: absent
+      delegate_to: "{{ _probe_dest }}"
+      changed_when: false
+
     - name: "Start overlay listener on {{ _probe_dest }}"
       ansible.builtin.command:
-        cmd: "python3 /tmp/udp_probe.py listen {{ _flannel_overlay_port }} {{ preflight_probe_duration }}"
+        argv: >-
+          {{
+            ['python3', '/tmp/udp_probe.py', 'listen',
+             _flannel_overlay_port | string,
+             preflight_probe_duration | string,
+             _listener_ready_file] + _expected
+          }}
       async: "{{ (preflight_probe_duration | int) + 15 }}"
       poll: 0
       delegate_to: "{{ _probe_dest }}"
       register: _listener
       changed_when: false
 
-    - name: "Let the listener bind before sending on {{ _probe_dest }}"
-      ansible.builtin.pause:
-        seconds: 1
+    - name: "Wait until the overlay listener is ready on {{ _probe_dest }}"
+      ansible.builtin.wait_for:
+        path: "{{ _listener_ready_file }}"
+        state: present
+        timeout: 10
+      delegate_to: "{{ _probe_dest }}"
 
-    # Fire every peer's send concurrently (async + poll:0). A single send blocks
-    # for SEND_COUNT*SEND_INTERVAL (~1.5s) plus SSH/Python startup (~2s total).
-    # Run sequentially, N peers take N*~2s, which overruns the listener's
-    # preflight_probe_duration window once N>=3 (i.e. >=4-node clusters) — the
-    # late peers then send after the listener already exited and are reported as
-    # falsely "BLOCKED". Firing them concurrently lands all datagrams inside the
-    # window regardless of cluster size.
+    # Each async job continues in parallel after launch, but Ansible still starts
+    # the loop items one by one. The listener is already bound and has a generous
+    # maximum window, so controller/SSH startup time cannot consume a 5-second
+    # race window; successful rounds exit as soon as every peer token arrives.
     - name: "Send overlay probes from every peer to {{ _probe_dest }}"
       ansible.builtin.command:
-        cmd: "python3 /tmp/udp_probe.py send {{ _flannel_overlay_port }} {{ item }} {{ hostvars[_probe_dest]._node_ip_list | join(' ') }}"
+        argv: >-
+          {{
+            ['python3', '/tmp/udp_probe.py', 'send',
+             _flannel_overlay_port | string, item]
+            + hostvars[_probe_dest]._node_ip_list
+          }}
       delegate_to: "{{ item }}"
-      loop: "{{ ansible_play_hosts | difference([_probe_dest]) }}"
+      loop: "{{ _expected }}"
       async: "{{ (preflight_probe_duration | int) + 10 }}"
       poll: 0
+      register: _senders
       changed_when: false
 
     - name: "Collect listener result from {{ _probe_dest }}"
@@ -66,21 +94,95 @@
       delay: 1
       changed_when: false
 
-    - name: "Verify receive overlay probes from every peer on {{ _probe_dest }} "
+    # Without this the senders are fire-and-forget. A sender that never wrote a
+    # datagram, because python3 or the helper is missing or an address of the
+    # destination failed locally, is then indistinguishable from a dropped
+    # packet, and the assert below blames the network for it.
+    - name: "Collect sender results for {{ _probe_dest }}"
+      ansible.builtin.async_status:
+        jid: "{{ item.ansible_job_id }}"
+      delegate_to: "{{ item.item }}"
+      loop: "{{ _senders.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      register: _sender_results
+      until: _sender_results.finished
+      retries: "{{ [(preflight_probe_duration | int), 10] | max }}"
+      delay: 1
+      failed_when: false
+      changed_when: false
+
+    # Sender health and received tokens are asserted together, because failing
+    # on the first would skip the second and hide an unrelated network fault on
+    # another peer. A sender counts as healthy only when its job finished and
+    # returned 0; anything else, including a status that could not be read, is a
+    # peer this round proves nothing about, and it is excluded from the network
+    # verdict rather than blamed for it.
+    - name: "Verify overlay reachability into {{ _probe_dest }}"
       ansible.builtin.assert:
         that:
+          - _bad_senders | length == 0
           - _unreached | length == 0
         fail_msg: >-
-          Overlay port UDP {{ _flannel_overlay_port }} is BLOCKED into {{ _probe_dest }}
-          ({{ hostvars[_probe_dest]._node_ip_list | join(', ') }}) from: {{ _unreached | join(', ') }}.
-          flannel would form the cluster but black-hole cross-node pod traffic for these
-          peers. Open UDP {{ _flannel_overlay_port }} ingress on {{ _probe_dest }} from
-          these nodes in the OpenStack security group (in both directions across the
-          cluster). Set preflight_connectivity_check=false to skip this check.
+          {{ ([_intro]
+              + ([_sender_text] if (_bad_senders | length > 0) else [])
+              + ([_slow_text] if (_unfinished_senders | length > 0) else [])
+              + ([_blocked_text] if (_unreached | length > 0) else [])
+             ) | join(' ') }}
         success_msg: >-
           {{ _probe_dest }} reachable on UDP {{ _flannel_overlay_port }} from all
           {{ _expected | length }} peer(s).
       vars:
-        _expected: "{{ ansible_play_hosts | difference([_probe_dest]) }}"
+        _results: "{{ _sender_results.results | default([]) }}"
+        _ok_senders: "{{ _results | selectattr('finished') | selectattr('rc', 'defined')
+                         | selectattr('rc', 'eq', 0) | map(attribute='item.item') | list }}"
+        _bad_senders: "{{ _expected | difference(_ok_senders) }}"
+        _unfinished_senders: "{{ _results | rejectattr('finished') | map(attribute='item.item') | list }}"
+        _sender_errors: "{{ _results | selectattr('stderr', 'defined')
+                            | map(attribute='stderr') | select | list }}"
         _received: "{{ _probe_result.stdout_lines | default([]) | map('trim') | select | list }}"
-        _unreached: "{{ _expected | difference(_received) }}"
+        _unreached: "{{ _expected | difference(_received) | difference(_bad_senders) }}"
+        _intro: >-
+          The overlay preflight into {{ _probe_dest }}
+          ({{ hostvars[_probe_dest]._node_ip_list | join(', ') }}) did not pass.
+        _sender_text: >-
+          These nodes could not write to every address of {{ _probe_dest }}. Every
+          address is required because the check cannot know which of them the CNI
+          will use as a tunnel endpoint. The write failed on the sending node
+          itself, which is not a proven ingress block at {{ _probe_dest }}.
+          Affected are {{ _bad_senders | join(', ') }}. Their stderr reads
+          {{ _sender_errors | join(' | ') }}.
+        _slow_text: >-
+          Some of them were still running when their result was collected, which
+          proves nothing either way. Affected are
+          {{ _unfinished_senders | join(', ') }}. Raise preflight_probe_duration.
+        _blocked_text: >-
+          Overlay port UDP {{ _flannel_overlay_port }} is BLOCKED into
+          {{ _probe_dest }} from {{ _unreached | join(', ') }}, which sent their
+          probe without error. flannel would form the cluster but black-hole
+          cross-node pod traffic for these peers. Open UDP
+          {{ _flannel_overlay_port }} ingress on {{ _probe_dest }} from these
+          nodes in the OpenStack security group, in both directions across the
+          cluster. Set preflight_connectivity_check=false to skip this check.
+
+  always:
+    - name: "Remove listener readiness marker on {{ _probe_dest }}"
+      ansible.builtin.file:
+        path: "{{ _listener_ready_file }}"
+        state: absent
+      delegate_to: "{{ _probe_dest }}"
+      changed_when: false
+
+    - name: "Wait for overlay listener to stop on {{ _probe_dest }}"
+      ansible.builtin.async_status:
+        jid: "{{ _listener.ansible_job_id }}"
+      delegate_to: "{{ _probe_dest }}"
+      register: _listener_stopped
+      until: _listener_stopped.finished
+      retries: 5
+      delay: 1
+      when:
+        - _listener is defined
+        - _listener.ansible_job_id is defined
+      changed_when: false
+      failed_when: false

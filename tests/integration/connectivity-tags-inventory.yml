@@ -1,0 +1,8 @@
+all:
+  children:
+    k3s_nodes:
+      hosts:
+        node-a:
+          ansible_connection: local
+        node-b:
+          ansible_connection: local
